@@ -67,6 +67,10 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 .api-metric{background:#f8fafc;border:1px solid #edf0f3;border-radius:10px;padding:.58rem .65rem}
 .api-metric-label{font-size:.61rem;text-transform:uppercase;letter-spacing:.04em;font-weight:800;color:#94a3b8}
 .api-metric-value{margin-top:.2rem;font-size:.83rem;font-weight:900;color:#111827}
+.api-source-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.42rem;margin:.72rem 0 .2rem}
+.api-source-item{border-top:1px solid #eef0f3;padding-top:.48rem;min-width:0}
+.api-source-label{font-size:.56rem;font-weight:900;letter-spacing:.035em;text-transform:uppercase;color:#94a3b8}
+.api-source-value{margin-top:.15rem;font-size:.72rem;font-weight:900;color:#111827;overflow-wrap:anywhere}
 .api-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:.7rem;margin-top:.72rem}
 .api-last{font-size:.67rem;color:#64748b;line-height:1.5}
 .spark-wrap{width:104px}
@@ -98,6 +102,7 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 
 @media (max-width:1100px){.api-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.source-grid{grid-template-columns:1fr}}
 @media (max-width:900px){
+.api-source-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .block-container{padding-top:2rem!important;padding-left:1rem!important;padding-right:1rem!important;padding-bottom:2rem!important}
 .setta-logo-card{min-height:105px;margin-bottom:1.8rem;padding:.9rem 1rem}.setta-logo-card img{max-width:170px;max-height:72px}
 .app-head{flex-direction:column;gap:.7rem}.app-title{font-size:2rem!important}
@@ -128,11 +133,16 @@ def esc(value: object) -> str:
 
 
 def section_band(kicker: str, title: str, note: str) -> None:
+    note_html = (
+        f'<div class="section-band-note">{esc(note)}</div>'
+        if str(note or "").strip()
+        else ""
+    )
     markup = (
         '<div class="section-band">'
         f'<div class="section-band-kicker">{esc(kicker)}</div>'
         f'<div class="section-band-title">{esc(title)}</div>'
-        f'<div class="section-band-note">{esc(note)}</div>'
+        f'{note_html}'
         '</div>'
     )
     st.markdown(markup, unsafe_allow_html=True)
@@ -179,6 +189,25 @@ def api_card(api: dict) -> str:
     uptime = api.get("uptime_24h")
     uptime_text = "—" if uptime is None else f"{float(uptime):.2f}%"
     failures = int(api.get("consecutive_failures") or 0)
+    meta = api.get("integration_meta") or {}
+    source_html = ""
+    if meta:
+        carga = meta.get("carga_id")
+        itens = meta.get("total_itens")
+        produtos = meta.get("total_produtos")
+        fonte_dt = meta.get("ultima_verificacao_em")
+        source_html = (
+            '<div class="api-source-grid">'
+            '<div class="api-source-item"><div class="api-source-label">Carga</div>'
+            f'<div class="api-source-value">#{esc(carga if carga is not None else "—")}</div></div>'
+            '<div class="api-source-item"><div class="api-source-label">Itens</div>'
+            f'<div class="api-source-value">{esc(itens if itens is not None else "—")}</div></div>'
+            '<div class="api-source-item"><div class="api-source-label">Produtos</div>'
+            f'<div class="api-source-value">{esc(produtos if produtos is not None else "—")}</div></div>'
+            '<div class="api-source-item"><div class="api-source-label">Fonte</div>'
+            f'<div class="api-source-value">{esc(meta.get("status_carga") or "—")}</div></div>'
+            '</div>'
+        )
 
     return (
         '<div class="api-card" '
@@ -195,6 +224,7 @@ def api_card(api: dict) -> str:
         f'<div class="api-metric"><div class="api-metric-label">Uptime 24h</div><div class="api-metric-value">{esc(uptime_text)}</div></div>'
         f'<div class="api-metric"><div class="api-metric-label">Falhas seguidas</div><div class="api-metric-value">{failures}</div></div>'
         '</div>'
+        f'{source_html}'
         '<div class="api-foot">'
         '<div class="api-last">'
         f'<b>Última verificação</b><br>{esc(api.get("last_check_label") or "Aguardando")}<br>'
