@@ -14,3 +14,11 @@ jobs:
           python-version: "3.12"
       - name: Compile Python
         run: python -m py_compile streamlit_app.py data_store.py monitor_logic.py monitor_worker.py ui.py
+      - name: Validate UI imports
+        run: |
+          python - <<'PY'
+          import ui
+          assert hasattr(ui, "integration_card"), "ui.integration_card ausente"
+          from ui import api_card, derived_card, inject_css, kpi_grid, logo_html, section_band, source_card
+          print("UI_IMPORTS_OK")
+          PY
