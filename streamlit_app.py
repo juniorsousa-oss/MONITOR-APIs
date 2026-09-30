@@ -12,7 +12,7 @@ from streamlit_autorefresh import st_autorefresh
 
 import data_store as store
 import monitor_logic as monitor
-from ui import api_card, inject_css, kpi_grid, logo_html, section_band, source_card
+from ui import api_card, derived_card, inject_css, kpi_grid, logo_html, section_band, source_card
 
 TZ = ZoneInfo("America/Sao_Paulo")
 VISUAL_CONFIG = store.load_visual_config()
@@ -405,23 +405,34 @@ def render_monitor() -> None:
 def render_database() -> None:
     render_header(
         "BANCO DE DADOS | SETTA",
-        "Fontes • Alimentação • Histórico",
+        "Fontes • Processamentos • Alimentação",
         "CENTRAL DE DADOS",
     )
 
-    if store.supabase_enabled():
-        st.caption("Banco central conectado")
-    else:
-        st.caption("Modo local de validação")
-
     sources = store.list_sources()
-    updated = sum(1 for x in sources if str(x.get("status")).upper() == "ATUALIZADO")
-    total_rows = sum(int(x.get("rows_count") or 0) for x in sources)
+    derived = store.list_derived_bases()
+    updated = sum(
+        1
+        for item in sources
+        if str(item.get("status")).upper() == "ATUALIZADO"
+    )
+
+    system_status = monitor.hydrate_all(store.system_apis())
+    active_apis = sum(
+        1
+        for item in system_status
+        if str(item.get("status")).upper() == "ONLINE"
+    )
+
+    for base in derived:
+        if base.get("key") == "materiais_api" and system_status:
+            api_status = str(system_status[0].get("status") or "SEM DADOS").upper()
+            base["mode"] = f"API {api_status}"
 
     kpi_grid(
         [
             {
-                "label": "Bases previstas",
+                "label": "Fontes de origem",
                 "value": len(sources),
                 "note": "",
                 "accent": "#111827",
@@ -433,33 +444,34 @@ def render_database() -> None:
                 "accent": "#22c55e",
             },
             {
-                "label": "Aguardando",
-                "value": len(sources) - updated,
-                "note": "",
-                "accent": "#f59e0b",
-            },
-            {
-                "label": "Registros",
-                "value": f"{total_rows:,}".replace(",", "."),
+                "label": "Bases derivadas",
+                "value": len(derived),
                 "note": "",
                 "accent": "#64748b",
+            },
+            {
+                "label": "APIs ativas",
+                "value": active_apis,
+                "note": "",
+                "accent": "#2563eb",
             },
         ]
     )
 
     section_band(
-        "01 · FONTES",
-        "BASES COMPARTILHADAS",
+        "01 · ORIGEM",
+        "FONTES DE DADOS",
         "",
     )
-    normalized = []
-    for source in sources:
-        normalized.append(
-            {
-                **source,
-                "last_update_label": store.format_dt(source.get("last_update_at")),
-            }
-        )
+    normalized = [
+        {
+            **source,
+            "last_update_label": store.format_dt(
+                source.get("last_update_at")
+            ),
+        }
+        for source in sources
+    ]
     st.markdown(
         '<div class="source-grid">'
         + "".join(source_card(source) for source in normalized)
@@ -468,32 +480,62 @@ def render_database() -> None:
     )
 
     section_band(
-        "02 · ALIMENTAÇÃO",
-        "ATUALIZAR BASE DE DADOS",
+        "02 · PROCESSAMENTO",
+        "BASES DERIVADAS",
         "",
     )
-    source_options = {
-        f"{x['name']} · {x['source_key']}": x["source_key"] for x in sources
+    st.markdown(
+        '<div class="derived-grid">'
+        + "".join(derived_card(base) for base in derived)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    section_band(
+        "03 · ALIMENTAÇÃO",
+        "ATUALIZAR FONTE",
+        "",
+    )
+
+    source_map = {
+        f"{item['name']} · {item['source_system']}": item
+        for item in sources
     }
-    selected_label = st.selectbox("Base de destino", list(source_options.keys()))
-    source_key = source_options[selected_label]
+    selected_label = st.selectbox(
+        "Fonte",
+        list(source_map.keys()),
+        key="central_source_select",
+    )
+    selected = source_map[selected_label]
+    source_key = selected["source_key"]
+
+    m1, m2 = st.columns(2)
+    m1.metric("Origem", selected.get("source_system") or "—")
+    m2.metric("Última atualização", store.format_dt(selected.get("last_update_at")))
+
     uploaded = st.file_uploader(
-        "Relatório",
+        "Arquivo",
         type=["xlsx", "xlsm", "xltx", "csv", "xml", "txt", "json"],
         accept_multiple_files=False,
+        key=f"central_upload_{source_key}",
     )
 
     if uploaded is not None:
         raw = uploaded.getvalue()
         rows_count = _count_rows(uploaded.name, raw)
-        p1, p2, p3 = st.columns(3)
+
+        p1, p2 = st.columns(2)
         p1.metric("Arquivo", uploaded.name)
-        p2.metric("Tamanho", f"{len(raw) / 1024:.1f} KB")
-        p3.metric("Linhas detectadas", rows_count if rows_count else "—")
+        p2.metric(
+            "Registros",
+            rows_count if rows_count else "—",
+        )
+
         if st.button(
-            "SALVAR NA CENTRAL DE DADOS",
+            "ATUALIZAR BASE",
             type="primary",
             use_container_width=True,
+            key=f"save_source_{source_key}",
         ):
             try:
                 store.save_report(
@@ -501,34 +543,12 @@ def render_database() -> None:
                     uploaded.name,
                     raw,
                     rows_count=rows_count,
+                    origin=selected.get("source_system") or "UPLOAD",
                 )
-                st.success("Base atualizada e histórico registrado.")
+                st.success("Base atualizada.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"Não foi possível salvar a carga: {exc}")
-
-    section_band(
-        "03 · RASTREABILIDADE",
-        "HISTÓRICO DE CARGAS",
-        "",
-    )
-    imports = store.list_imports(limit=100)
-    if imports:
-        frame = pd.DataFrame(imports)
-        rename = {
-            "source_key": "Base",
-            "file_name": "Arquivo",
-            "rows_count": "Registros",
-            "origin": "Origem",
-            "imported_at": "Data/Hora",
-        }
-        wanted = [x for x in rename if x in frame.columns]
-        view = frame[wanted].rename(columns=rename)
-        if "Data/Hora" in view.columns:
-            view["Data/Hora"] = view["Data/Hora"].map(store.format_dt)
-        st.dataframe(view, use_container_width=True, hide_index=True)
-    else:
-        st.info("Nenhuma carga registrada até o momento.")
+                st.error(f"Não foi possível atualizar a base: {exc}")
 
 
 page = render_sidebar()
