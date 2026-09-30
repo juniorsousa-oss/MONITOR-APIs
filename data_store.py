@@ -572,7 +572,7 @@ def save_report(
     client.storage.from_("setta-data").upload_to_signed_url(
         path=path,
         token=token,
-        file=io.BytesIO(raw),
+        file=raw,
     )
 
     committed = central_api_call(
