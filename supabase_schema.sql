@@ -86,3 +86,15 @@ alter table public.api_checks enable row level security;
 alter table public.api_incidents enable row level security;
 alter table public.data_sources enable row level security;
 alter table public.data_imports enable row level security;
+
+
+create table if not exists public.app_visual_config (
+    config_key text primary key,
+    logo_data text,
+    logo_mime text,
+    favicon_data text,
+    favicon_mime text,
+    updated_at timestamptz not null default now()
+);
+
+alter table public.app_visual_config enable row level security;
