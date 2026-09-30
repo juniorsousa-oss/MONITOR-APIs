@@ -14,11 +14,32 @@ jobs:
           python-version: "3.12"
       - name: Compile Python
         run: python -m py_compile streamlit_app.py data_store.py monitor_logic.py monitor_worker.py ui.py
-      - name: Validate UI imports
+      - name: Validate UI contract
         run: |
           python - <<'PY'
-          import ui
-          assert hasattr(ui, "integration_card"), "ui.integration_card ausente"
-          from ui import api_card, derived_card, inject_css, kpi_grid, logo_html, section_band, source_card
-          print("UI_IMPORTS_OK")
+          import ast
+          from pathlib import Path
+
+          tree = ast.parse(Path("ui.py").read_text(encoding="utf-8"))
+          functions = {
+              node.name
+              for node in ast.walk(tree)
+              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+          }
+          required = {
+              "api_card",
+              "derived_card",
+              "inject_css",
+              "integration_card",
+              "kpi_grid",
+              "logo_html",
+              "section_band",
+              "source_card",
+          }
+          missing = sorted(required - functions)
+          assert not missing, f"Funções UI ausentes: {missing}"
+
+          app = Path("streamlit_app.py").read_text(encoding="utf-8")
+          assert "ui_components.integration_card(item)" in app
+          print("UI_CONTRACT_OK")
           PY
