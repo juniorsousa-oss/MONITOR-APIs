@@ -2,7 +2,6 @@ services:
   - type: web
     name: setta-monitor-apis
     runtime: python
-    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port $PORT
     healthCheckPath: /_stcore/health
@@ -17,7 +16,6 @@ services:
   - type: worker
     name: setta-monitor-worker
     runtime: python
-    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: python monitor_worker.py --loop --interval 60
     envVars:
