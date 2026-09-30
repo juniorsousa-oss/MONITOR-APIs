@@ -204,8 +204,8 @@ def api_card(api: dict) -> str:
             f'<div class="api-source-value">{esc(itens if itens is not None else "—")}</div></div>'
             '<div class="api-source-item"><div class="api-source-label">Produtos</div>'
             f'<div class="api-source-value">{esc(produtos if produtos is not None else "—")}</div></div>'
-            '<div class="api-source-item"><div class="api-source-label">Fonte</div>'
-            f'<div class="api-source-value">{esc(meta.get("status_carga") or "—")}</div></div>'
+            '<div class="api-source-item"><div class="api-source-label">Últ. fonte</div>'
+            f'<div class="api-source-value">{esc(meta.get("ultima_verificacao_label") or "—")}</div></div>'
             '</div>'
         )
 
