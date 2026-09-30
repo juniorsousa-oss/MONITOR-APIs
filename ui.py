@@ -151,12 +151,18 @@ def section_band(kicker: str, title: str, note: str) -> None:
 def kpi_grid(items: list[dict]) -> None:
     cards = []
     for item in items:
+        note = str(item.get("note") or "").strip()
+        note_html = (
+            f'<div class="kpi-note">{esc(note)}</div>'
+            if note
+            else ""
+        )
         cards.append(
             '<div class="kpi-card" '
             f'style="--accent:{esc(item.get("accent", "#111827"))}">'
             f'<div class="kpi-label">{esc(item.get("label"))}</div>'
             f'<div class="kpi-value">{esc(item.get("value"))}</div>'
-            f'<div class="kpi-note">{esc(item.get("note"))}</div>'
+            f'{note_html}'
             '</div>'
         )
     st.markdown('<div class="kpi-grid">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
