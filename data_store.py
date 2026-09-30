@@ -18,6 +18,13 @@ UPLOAD_DIR = RUNTIME / "uploads"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 
+CENTRAL_SUPABASE_URL = "https://cuixazpxkvniqldmmnth.supabase.co"
+CENTRAL_SUPABASE_ANON_KEY = (
+    os.getenv("SETTA_SUPABASE_ANON_KEY", "").strip()
+    or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1aXhhenB4a3ZuaXFsZG1tbnRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1MTYwNTMsImV4cCI6MjEwMzA5MjA1M30.jNFaIG1FcDYnMAoVaI23UYMuRL1BpZmuqu_LPEYb88E"
+)
+CENTRAL_EDGE_URL = f"{CENTRAL_SUPABASE_URL}/functions/v1/setta-data-api"
+
 _client = None
 
 
@@ -38,6 +45,31 @@ def parse_dt(value: Any) -> datetime | None:
 def format_dt(value: Any) -> str:
     dt = parse_dt(value)
     return dt.strftime("%d/%m/%Y %H:%M:%S") if dt else "—"
+
+
+def central_api_call(action: str, payload: dict | None = None, timeout: int = 60) -> dict:
+    response = requests.post(
+        CENTRAL_EDGE_URL,
+        headers={
+            "Authorization": f"Bearer {CENTRAL_SUPABASE_ANON_KEY}",
+            "apikey": CENTRAL_SUPABASE_ANON_KEY,
+            "Content-Type": "application/json",
+        },
+        json={"action": action, "payload": payload or {}},
+        timeout=timeout,
+    )
+    try:
+        data = response.json()
+    except Exception:
+        data = {"ok": False, "error": response.text or f"HTTP {response.status_code}"}
+    if not response.ok or not data.get("ok"):
+        raise RuntimeError(data.get("error") or f"HTTP {response.status_code}")
+    return data
+
+
+def central_client():
+    from supabase import create_client
+    return create_client(CENTRAL_SUPABASE_URL, CENTRAL_SUPABASE_ANON_KEY)
 
 
 def supabase_enabled() -> bool:
@@ -448,97 +480,78 @@ DERIVED_CATALOG = [
 
 
 def list_sources() -> list[dict]:
-    client = get_client()
-    saved: list[dict] = []
-    if client:
-        try:
-            saved = client.table("data_sources").select("*").order("name").execute().data or []
-        except Exception:
-            saved = []
-    else:
-        saved = _load_local()["sources"]
+    try:
+        rows = central_api_call(
+            "source_status",
+            {"keys": [item["key"] for item in SOURCE_CATALOG]},
+            timeout=30,
+        ).get("data") or []
+        by_key = {
+            str(row.get("source_key")): row
+            for row in rows
+            if isinstance(row, dict)
+        }
+    except Exception:
+        by_key = {}
 
-    by_key = {x.get("source_key"): x for x in saved}
     result = []
     for base in SOURCE_CATALOG:
         row = by_key.get(base["key"], {})
-        merged = {
-            "source_key": base["key"],
-            "name": base["name"],
-            "apps": base["apps"],
-            "source_system": base["source_system"],
-            "mode": row.get("mode") or base["mode"],
-            "api_plan": bool(base.get("api_plan")),
-            "status": row.get("status") or "AGUARDANDO",
-            "last_update_at": row.get("last_update_at"),
-            "rows_count": row.get("rows_count") or 0,
-            "origin": row.get("origin") or base["source_system"],
-            "last_file_name": row.get("last_file_name") or "",
-        }
-        result.append(merged)
+        result.append(
+            {
+                "source_key": base["key"],
+                "name": base["name"],
+                "apps": base["apps"],
+                "source_system": base["source_system"],
+                "mode": base["mode"],
+                "api_plan": bool(base.get("api_plan")),
+                "status": row.get("status") or "AGUARDANDO",
+                "last_update_at": row.get("last_update_at"),
+                "rows_count": row.get("rows_count") or 0,
+                "origin": row.get("origin") or base["source_system"],
+                "last_file_name": row.get("last_file_name") or "",
+                "version": int(row.get("version") or 0),
+                "available": bool(row.get("available")),
+            }
+        )
     return result
 
 
-def list_derived_bases() -> list[dict]:
-    return [dict(item) for item in DERIVED_CATALOG]
+def save_report(
+    source_key: str,
+    file_name: str,
+    raw: bytes,
+    rows_count: int = 0,
+    origin: str = "UPLOAD",
+) -> dict:
+    prepared = central_api_call(
+        "source_upload_prepare",
+        {"source_key": source_key},
+        timeout=30,
+    )
+    path = str(prepared.get("path") or "")
+    token = str(prepared.get("token") or "")
+    if not path or not token:
+        raise RuntimeError("A Central não retornou autorização para upload.")
 
+    client = central_client()
+    client.storage.from_("setta-data").upload_to_signed_url(
+        path=path,
+        token=token,
+        file=io.BytesIO(raw),
+    )
 
-def save_report(source_key: str, file_name: str, raw: bytes, rows_count: int = 0, origin: str = "UPLOAD") -> dict:
-    stamp = datetime.now(TZ).strftime("%Y%m%d_%H%M%S")
-    safe_name = "".join(c for c in Path(file_name).name if c.isalnum() or c in "._- ")
-    storage_path = f"current/{source_key}"
-    now = now_iso()
-    client = get_client()
-
-    if client:
-        client.storage.from_("setta-data").upload(
-            path=storage_path,
-            file=io.BytesIO(raw),
-            file_options={
-                "content-type": "application/octet-stream",
-                "upsert": "true",
-            },
-        )
-        source_row = {
+    committed = central_api_call(
+        "source_commit",
+        {
             "source_key": source_key,
-            "name": next((x["name"] for x in SOURCE_CATALOG if x["key"] == source_key), source_key.upper()),
-            "status": "ATUALIZADO",
-            "last_update_at": now,
+            "file_name": file_name,
             "rows_count": int(rows_count),
-            "origin": origin,
-            "last_file_name": file_name,
-            "updated_at": now,
-        }
-        client.table("data_sources").upsert(source_row, on_conflict="source_key").execute()
-        return source_row
-
-    folder = UPLOAD_DIR / source_key
-    folder.mkdir(parents=True, exist_ok=True)
-    target = folder / "current"
-    target.write_bytes(raw)
-    data = _load_local()
-    source = next((x for x in data["sources"] if x.get("source_key") == source_key), None)
-    if source is None:
-        source = {"source_key": source_key}
-        data["sources"].append(source)
-    source.update({
-        "status": "ATUALIZADO", "last_update_at": now, "rows_count": int(rows_count),
-        "origin": origin, "last_file_name": file_name, "updated_at": now
-    })
-    try:
-        local_storage_path = str(target.relative_to(ROOT))
-    except ValueError:
-        local_storage_path = str(target)
-    row = {
-        "source_key": source_key,
-        "file_name": file_name,
-        "storage_path": local_storage_path,
-        "rows_count": int(rows_count),
-        "origin": origin,
-        "updated_at": now,
-    }
-    _save_local(data)
-    return row
+            "mime_type": "application/octet-stream",
+        },
+        timeout=30,
+    ).get("data") or {}
+    return committed
 
 
 def list_imports(source_key: str | None = None, limit: int = 100) -> list[dict]:
