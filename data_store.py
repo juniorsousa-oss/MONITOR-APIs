@@ -397,9 +397,13 @@ def save_report(source_key: str, file_name: str, raw: bytes, rows_count: int = 0
         "status": "ATUALIZADO", "last_update_at": now, "rows_count": int(rows_count),
         "origin": origin, "last_file_name": file_name, "updated_at": now
     })
+    try:
+        local_storage_path = str(target.relative_to(ROOT))
+    except ValueError:
+        local_storage_path = str(target)
     row = {
         "id": str(uuid.uuid4()), "source_key": source_key, "file_name": file_name,
-        "storage_path": str(target.relative_to(ROOT)), "rows_count": int(rows_count),
+        "storage_path": local_storage_path, "rows_count": int(rows_count),
         "origin": origin, "imported_at": now,
     }
     data["imports"].append(row)
