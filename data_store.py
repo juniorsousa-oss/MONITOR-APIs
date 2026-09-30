@@ -487,11 +487,14 @@ def save_visual_config(
             "favicon_mime": current.get("favicon_mime") or "image/png",
             "updated_at": now_iso(),
         }
-        client.table("app_visual_config").upsert(
-            payload,
-            on_conflict="config_key",
-        ).execute()
-        return current
+        try:
+            client.table("app_visual_config").upsert(
+                payload,
+                on_conflict="config_key",
+            ).execute()
+            return current
+        except Exception:
+            pass
 
     data = _load_local()
     data["visual_config"] = current
@@ -508,7 +511,6 @@ def reset_visual_config() -> None:
             ).execute()
         except Exception:
             pass
-        return
 
     data = _load_local()
     data["visual_config"] = {}
