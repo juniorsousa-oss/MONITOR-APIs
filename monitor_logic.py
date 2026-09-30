@@ -76,6 +76,9 @@ def _nf_materials_status(response: requests.Response, latency: float, api: dict)
         "total_origem": payload.get("total_origem"),
         "total_validos": payload.get("total_validos"),
         "ultima_verificacao_em": payload.get("ultima_verificacao_em"),
+        "ultima_verificacao_label": store.format_dt(
+            payload.get("ultima_verificacao_em")
+        ),
     }
 
     error = ""
