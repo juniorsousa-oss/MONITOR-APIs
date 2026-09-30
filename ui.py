@@ -59,6 +59,15 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 .topic-divider{height:1px;background:#cbd5e1;margin:1.55rem 0 1.05rem;width:100%}
 
 .api-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin:.3rem 0 1rem}
+.integration-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin:.3rem 0 1rem}
+.integration-card{position:relative;background:#fff;border:1px solid #dfe3e8;border-radius:14px;box-shadow:0 4px 16px rgba(15,23,42,.05);padding:1rem 1.1rem;overflow:hidden;min-height:188px}
+.integration-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--status)}
+.integration-route{font-size:.68rem;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:.025em;margin-top:.18rem}
+.integration-meta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.58rem;margin:.9rem 0}
+.integration-meta{border:1px solid #eef1f5;border-radius:10px;padding:.55rem .62rem;background:#f8fafc}
+.integration-meta-label{font-size:.59rem;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em}
+.integration-meta-value{margin-top:.18rem;font-size:.78rem;font-weight:800;color:#111827;word-break:break-word}
+.integration-error{margin-top:.65rem;padding:.48rem .58rem;border-radius:9px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:.68rem;font-weight:800}
 .api-card{position:relative;background:#fff;border:1px solid #dfe3e8;border-radius:14px;box-shadow:0 4px 16px rgba(15,23,42,.05);padding:1rem 1.1rem;overflow:hidden;min-height:250px}
 .api-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--status)}
 .api-top{display:flex;align-items:flex-start;justify-content:space-between;gap:.7rem}
@@ -112,13 +121,13 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 .ok-notice{border-color:#bbf7d0;background:#f0fdf4;color:#166534}
 .footer{text-align:center;color:#9298a1;font-size:.72rem;padding-top:1.2rem}
 
-@media (max-width:1100px){.api-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.source-grid,.derived-grid{grid-template-columns:1fr}}
+@media (max-width:1100px){.api-grid,.integration-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.source-grid,.derived-grid{grid-template-columns:1fr}}
 @media (max-width:900px){
 .api-source-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .block-container{padding-top:2rem!important;padding-left:1rem!important;padding-right:1rem!important;padding-bottom:2rem!important}
 .setta-logo-card{min-height:105px;margin-bottom:1.8rem;padding:.9rem 1rem}.setta-logo-card img{max-width:170px;max-height:72px}
 .app-head{flex-direction:column;gap:.7rem}.app-title{font-size:2rem!important}
-.kpi-grid,.api-grid,.source-grid,.derived-grid{grid-template-columns:1fr!important}
+.kpi-grid,.api-grid,.integration-grid,.source-grid,.derived-grid{grid-template-columns:1fr!important}
 .table-row{grid-template-columns:1fr!important}.table-head{display:none!important}
 .table-cell{border-right:0!important;border-bottom:1px solid #eef0f3;justify-content:flex-start!important}
 .table-cell::before{content:attr(data-label);display:inline-block;min-width:108px;margin-right:.65rem;font-size:.62rem;font-weight:900;text-transform:uppercase;color:#64748b}
@@ -250,6 +259,48 @@ def api_card(api: dict) -> str:
         '</div>'
         f'<div class="spark-wrap"><div class="spark">{bars}</div><div class="spark-label">latência recente</div></div>'
         '</div></div>'
+    )
+
+
+
+def integration_card(item: dict) -> str:
+    status = str(item.get("status") or "SEM DADOS").upper()
+    status = status if status in STATUS_STYLE else "SEM DADOS"
+    accent, soft, text, border = STATUS_STYLE[status]
+
+    current = int(item.get("resource_count") or 0)
+    expected = int(item.get("expected_count") or 0)
+    resources = f"{current}/{expected}" if expected else str(current)
+    rows = int(item.get("rows_count") or 0)
+    rows_text = f"{rows:,}".replace(",", ".")
+    error = str(item.get("error_message") or "").strip()
+    error_html = (
+        f'<div class="integration-error">{esc(error)}</div>'
+        if error
+        else ""
+    )
+
+    return (
+        '<div class="integration-card" '
+        f'style="--status:{accent};--status-soft:{soft};--status-text:{text};--status-border:{border}">'
+        '<div class="api-top"><div>'
+        f'<div class="api-name">{esc(item.get("name") or "INTEGRAÇÃO")}</div>'
+        f'<div class="integration-route">{esc(item.get("source_app") or "—")} → {esc(item.get("target_app") or "—")}</div>'
+        '</div>'
+        f'<div class="status-badge"><span class="status-dot"></span>{esc(status)}</div>'
+        '</div>'
+        '<div class="integration-meta-grid">'
+        '<div class="integration-meta"><div class="integration-meta-label">FONTES / BASES</div>'
+        f'<div class="integration-meta-value">{esc(resources)}</div></div>'
+        '<div class="integration-meta"><div class="integration-meta-label">REGISTROS / ITENS</div>'
+        f'<div class="integration-meta-value">{esc(rows_text)}</div></div>'
+        '<div class="integration-meta"><div class="integration-meta-label">ÚLTIMA ATIVIDADE</div>'
+        f'<div class="integration-meta-value">{esc(item.get("last_activity_label") or "—")}</div></div>'
+        '<div class="integration-meta"><div class="integration-meta-label">ESTADO</div>'
+        f'<div class="integration-meta-value">{esc(item.get("version_label") or "—")}</div></div>'
+        '</div>'
+        f'{error_html}'
+        '</div>'
     )
 
 
