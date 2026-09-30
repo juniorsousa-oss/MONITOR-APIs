@@ -56,6 +56,7 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 .section-band-kicker{font-size:.66rem;font-weight:900;letter-spacing:.085em;text-transform:uppercase;color:#ef4444;margin-bottom:.18rem}
 .section-band-title{font-size:1.08rem;font-weight:900;color:#111827;letter-spacing:-.015em;line-height:1.2;text-transform:uppercase}
 .section-band-note{margin-top:.26rem;color:#667085;font-size:.78rem;line-height:1.45}
+.topic-divider{height:1px;background:#cbd5e1;margin:1.55rem 0 1.05rem;width:100%}
 
 .api-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin:.3rem 0 1rem}
 .api-card{position:relative;background:#fff;border:1px solid #dfe3e8;border-radius:14px;box-shadow:0 4px 16px rgba(15,23,42,.05);padding:1rem 1.1rem;overflow:hidden;min-height:250px}
