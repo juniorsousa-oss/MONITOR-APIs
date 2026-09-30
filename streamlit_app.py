@@ -54,95 +54,24 @@ def render_sidebar() -> str:
             '<div class="sidebar-brand-title">MONITOR DE APIs</div>'
             '<div class="sidebar-brand-sub">Central operacional SETTA</div>'
             '</div>'
-            '<div class="sidebar-section-label">Navegação</div>',
+            '<div class="sidebar-section-label">NAVEGAÇÃO</div>',
             unsafe_allow_html=True,
         )
         page = st.radio(
-            "Navegação",
-            ["Monitor de APIs", "Banco de Dados"],
+            "NAVEGAÇÃO",
+            ["MONITOR DE APIs", "BANCO DE DADOS"],
             label_visibility="collapsed",
         )
 
         st.markdown("---")
-        with st.expander("PERSONALIZAÇÃO", expanded=False):
-            st.caption("Logo do cabeçalho")
-            current_logo = logo_html(
-                str(VISUAL_CONFIG.get("logo_data") or ""),
-                str(VISUAL_CONFIG.get("logo_mime") or "image/svg+xml"),
-            )
-            st.markdown(
-                f'<div class="sidebar-logo-preview">{current_logo}</div>',
-                unsafe_allow_html=True,
-            )
-            logo_file = st.file_uploader(
-                "Alterar logo",
-                type=["png", "jpg", "jpeg", "webp", "svg"],
-                key="visual_logo_file",
-                label_visibility="collapsed",
-            )
-
-            st.caption("Ícone do navegador")
-            favicon_file = st.file_uploader(
-                "Alterar ícone",
-                type=["png", "jpg", "jpeg", "ico"],
-                key="visual_favicon_file",
-                label_visibility="collapsed",
-            )
-
-            save_col, reset_col = st.columns(2)
-            if save_col.button(
-                "SALVAR",
-                type="primary",
-                use_container_width=True,
-                key="save_visual_config",
-            ):
-                if logo_file is None and favicon_file is None:
-                    st.warning("Selecione a logo ou o ícone que deseja alterar.")
-                else:
-                    try:
-                        kwargs = {}
-                        if logo_file is not None:
-                            if len(logo_file.getvalue()) > 2 * 1024 * 1024:
-                                raise ValueError("A logo deve ter no máximo 2 MB.")
-                            kwargs["logo_data"] = base64.b64encode(
-                                logo_file.getvalue()
-                            ).decode()
-                            kwargs["logo_mime"] = (
-                                logo_file.type or "image/png"
-                            )
-                        if favicon_file is not None:
-                            if len(favicon_file.getvalue()) > 1 * 1024 * 1024:
-                                raise ValueError(
-                                    "O ícone deve ter no máximo 1 MB."
-                                )
-                            raw_icon = favicon_file.getvalue()
-                            image = Image.open(io.BytesIO(raw_icon))
-                            image.verify()
-                            kwargs["favicon_data"] = base64.b64encode(
-                                raw_icon
-                            ).decode()
-                            kwargs["favicon_mime"] = (
-                                favicon_file.type or "image/png"
-                            )
-                        store.save_visual_config(**kwargs)
-                        st.success("Identidade visual atualizada.")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Não foi possível salvar: {exc}")
-
-            if reset_col.button(
-                "PADRÃO",
-                use_container_width=True,
-                key="reset_visual_config",
-            ):
-                store.reset_visual_config()
-                st.rerun()
-
-        if store.supabase_enabled():
-            st.success("Banco central conectado", icon="✓")
-        else:
-            st.info("Modo local de validação", icon="ℹ")
-        st.caption("Atualização automática · 30 s")
+        st.markdown(
+            '<div class="sidebar-info-card">'
+            '<b>CENTRAL DE DADOS</b><br>'
+            'IDENTIDADE VISUAL GLOBAL<br>'
+            'ATUALIZAÇÃO AUTOMÁTICA · 30 S'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     return page
 
 
@@ -554,7 +483,7 @@ def render_database() -> None:
 page = render_sidebar()
 render_logo()
 
-if page == "Monitor de APIs":
+if page == "MONITOR DE APIs":
     render_monitor()
 else:
     render_database()
