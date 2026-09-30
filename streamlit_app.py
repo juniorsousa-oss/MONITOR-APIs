@@ -287,7 +287,7 @@ def render_monitor() -> None:
         ]
     )
 
-    real_apis = list(raw_apis)
+    real_apis = list(apis)
     b1, b2 = st.columns([1, 1])
     if b1.button(
         "VERIFICAR TODAS AGORA",
@@ -316,7 +316,7 @@ def render_monitor() -> None:
     )
 
     if real_apis:
-        with st.expander("DETALHES E HISTÓRICO DAS APIs", expanded=False):
+        with st.expander("DETALHES", expanded=False):
             api_map = {str(x.get("name")): x for x in real_apis}
             selected_name = st.selectbox("API", list(api_map.keys()))
             selected = api_map[selected_name]
@@ -326,26 +326,31 @@ def render_monitor() -> None:
             h3.metric("Timeout", f"{selected.get('timeout_seconds') or 10}s")
             st.code(str(selected.get("endpoint") or ""), language=None)
 
-            checks = store.list_checks(str(selected.get("id")), limit=50)
-            if checks:
-                history = pd.DataFrame(checks)
-                cols = [
-                    c
-                    for c in [
-                        "checked_at",
-                        "status",
-                        "http_status",
-                        "latency_ms",
-                        "success",
-                        "error_message",
-                    ]
-                    if c in history.columns
-                ]
-                st.dataframe(history[cols], use_container_width=True, hide_index=True)
+            if selected.get("system"):
+                meta = selected.get("integration_meta") or {}
+                s1, s2, s3, s4 = st.columns(4)
+                s1.metric("Carga", f"#{meta.get('carga_id') or '—'}")
+                s2.metric("Itens", meta.get("total_itens") or 0)
+                s3.metric("Produtos", meta.get("total_produtos") or 0)
+                s4.metric("Últ. fonte", meta.get("ultima_verificacao_label") or "—")
             else:
-                st.info("Ainda não existem verificações gravadas para esta API.")
+                checks = store.list_checks(str(selected.get("id")), limit=50)
+                if checks:
+                    history = pd.DataFrame(checks)
+                    cols = [
+                        c
+                        for c in [
+                            "checked_at",
+                            "status",
+                            "http_status",
+                            "latency_ms",
+                            "success",
+                            "error_message",
+                        ]
+                        if c in history.columns
+                    ]
+                    st.dataframe(history[cols], use_container_width=True, hide_index=True)
 
-            if not selected.get("system"):
                 if st.button("EXCLUIR API SELECIONADA", type="secondary"):
                     store.delete_api(str(selected.get("id")))
                     st.rerun()
@@ -356,6 +361,17 @@ def render_monitor() -> None:
         "",
     )
     incidents = store.list_incidents(limit=12)
+    for api in apis:
+        if api.get("system") and str(api.get("status")).upper() in {"OFFLINE", "ATENÇÃO"}:
+            incidents = [
+                {
+                    "started_at": api.get("last_check_at"),
+                    "api_name": api.get("name"),
+                    "kind": "STATUS ATUAL",
+                    "status": "ABERTO",
+                    "resolved_at": None,
+                }
+            ] + incidents
     if incidents:
         rows = ['<div class="table-card">']
         rows.append(
