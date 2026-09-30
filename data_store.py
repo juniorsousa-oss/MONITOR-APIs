@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import uuid
@@ -359,9 +360,12 @@ def save_report(source_key: str, file_name: str, raw: bytes, rows_count: int = 0
 
     if client:
         client.storage.from_("setta-data").upload(
-            storage_path,
-            raw,
-            {"content-type": "application/octet-stream", "upsert": "false"},
+            path=storage_path,
+            file=io.BytesIO(raw),
+            file_options={
+                "content-type": "application/octet-stream",
+                "upsert": "false",
+            },
         )
         source_row = {
             "source_key": source_key,
