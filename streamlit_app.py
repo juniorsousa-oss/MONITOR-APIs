@@ -479,6 +479,75 @@ def render_database() -> None:
             except Exception as exc:
                 st.error(f"Não foi possível atualizar a base: {exc}")
 
+    section_band(
+        "04 · PADRÃO SETTA",
+        "IDENTIDADE VISUAL GLOBAL",
+        "",
+    )
+
+    current_logo = logo_html(
+        str(VISUAL_CONFIG.get("logo_data") or ""),
+        str(VISUAL_CONFIG.get("logo_mime") or "image/svg+xml"),
+    )
+    st.markdown(
+        f'<div class="global-visual-preview">{current_logo}</div>',
+        unsafe_allow_html=True,
+    )
+
+    v1, v2 = st.columns(2)
+    logo_file = v1.file_uploader(
+        "LOGO GLOBAL",
+        type=["png", "jpg", "jpeg", "webp", "svg"],
+        key="global_logo_file",
+    )
+    favicon_file = v2.file_uploader(
+        "FAVICON GLOBAL",
+        type=["png", "jpg", "jpeg", "ico"],
+        key="global_favicon_file",
+    )
+
+    save_col, reset_col = st.columns(2)
+    if save_col.button(
+        "SALVAR IDENTIDADE GLOBAL",
+        type="primary",
+        use_container_width=True,
+        key="save_global_visual_config",
+    ):
+        if logo_file is None and favicon_file is None:
+            st.warning("Selecione a logo ou o favicon.")
+        else:
+            try:
+                kwargs = {}
+                if logo_file is not None:
+                    raw_logo = logo_file.getvalue()
+                    if len(raw_logo) > 2 * 1024 * 1024:
+                        raise ValueError("A logo deve ter no máximo 2 MB.")
+                    kwargs["logo_data"] = base64.b64encode(raw_logo).decode()
+                    kwargs["logo_mime"] = logo_file.type or "image/png"
+
+                if favicon_file is not None:
+                    raw_icon = favicon_file.getvalue()
+                    if len(raw_icon) > 1 * 1024 * 1024:
+                        raise ValueError("O favicon deve ter no máximo 1 MB.")
+                    image = Image.open(io.BytesIO(raw_icon))
+                    image.verify()
+                    kwargs["favicon_data"] = base64.b64encode(raw_icon).decode()
+                    kwargs["favicon_mime"] = favicon_file.type or "image/png"
+
+                store.save_visual_config(**kwargs)
+                st.success("Identidade visual global atualizada.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Não foi possível salvar: {exc}")
+
+    if reset_col.button(
+        "RESTAURAR PADRÃO",
+        use_container_width=True,
+        key="reset_global_visual_config",
+    ):
+        store.reset_visual_config()
+        st.rerun()
+
 
 page = render_sidebar()
 render_logo()
