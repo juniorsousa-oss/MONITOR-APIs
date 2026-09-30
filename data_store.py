@@ -171,6 +171,43 @@ def system_apis() -> list[dict]:
     ]
 
 
+
+def list_integrations() -> list[dict]:
+    try:
+        rows = central_api_call("integration_status", timeout=30).get("data") or []
+    except Exception as exc:
+        return [
+            {
+                "id": "integration-status-error",
+                "name": "INTEGRAÇÕES SETTA",
+                "source_app": "MONITOR DE APIS",
+                "target_app": "CENTRAL DE DADOS",
+                "status": "OFFLINE",
+                "last_activity_at": None,
+                "last_activity_label": "—",
+                "resource_count": 0,
+                "expected_count": 0,
+                "rows_count": 0,
+                "version_label": "FALHA AO CONSULTAR INTEGRAÇÕES",
+                "resources": [],
+                "error_message": str(exc),
+            }
+        ]
+
+    output: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        item["status"] = str(item.get("status") or "SEM DADOS").upper()
+        item["last_activity_label"] = format_dt(item.get("last_activity_at"))
+        item["resource_count"] = int(item.get("resource_count") or 0)
+        item["expected_count"] = int(item.get("expected_count") or 0)
+        item["rows_count"] = int(item.get("rows_count") or 0)
+        output.append(item)
+    return output
+
+
 def list_apis(include_demo: bool = True) -> list[dict]:
     client = get_client()
     rows: list[dict] = []
