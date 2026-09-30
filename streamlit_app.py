@@ -430,54 +430,116 @@ def render_database() -> None:
         f"{item['name']} · {item['source_system']}": item
         for item in sources
     }
-    selected_label = st.selectbox(
-        "Fonte",
+
+    preset = st.radio(
+        "PACOTE DE ALIMENTAÇÃO",
+        [
+            "PERSONALIZADO",
+            "RELATÓRIO GERAL",
+            "ESTOQUE",
+            "COMPRAS",
+            "TCTP",
+        ],
+        horizontal=True,
+        key="central_feed_preset",
+    )
+
+    preset_keys = {
+        "RELATÓRIO GERAL": {"relatorio_geral", "for001", "for022"},
+        "ESTOQUE": {"analitico", "endereco"},
+        "COMPRAS": {"sc", "pc", "pre_nota"},
+        "TCTP": {"pmp", "h001"},
+    }
+
+    default_labels = []
+    if preset != "PERSONALIZADO":
+        wanted = preset_keys[preset]
+        default_labels = [
+            label
+            for label, item in source_map.items()
+            if item.get("source_key") in wanted
+        ]
+
+    selected_labels = st.multiselect(
+        "FONTES A ATUALIZAR",
         list(source_map.keys()),
-        key="central_source_select",
-    )
-    selected = source_map[selected_label]
-    source_key = selected["source_key"]
-
-    m1, m2 = st.columns(2)
-    m1.metric("Origem", selected.get("source_system") or "—")
-    m2.metric("Última atualização", store.format_dt(selected.get("last_update_at")))
-
-    uploaded = st.file_uploader(
-        "Arquivo",
-        type=["xlsx", "xlsm", "xltx", "csv", "xml", "txt", "json"],
-        accept_multiple_files=False,
-        key=f"central_upload_{source_key}",
+        default=default_labels,
+        key=f"central_source_multi_{preset}",
     )
 
-    if uploaded is not None:
-        raw = uploaded.getvalue()
-        rows_count = _count_rows(uploaded.name, raw)
+    selected_sources = [source_map[label] for label in selected_labels]
+    uploads = {}
 
-        p1, p2 = st.columns(2)
-        p1.metric("Arquivo", uploaded.name)
-        p2.metric(
-            "Registros",
-            rows_count if rows_count else "—",
+    for source in selected_sources:
+        source_key = source["source_key"]
+        st.markdown(
+            f"**{source['name']}** · {source['source_system']} · "
+            f"última atualização {store.format_dt(source.get('last_update_at'))}"
         )
+        uploaded = st.file_uploader(
+            f"ARQUIVO — {source['name']}",
+            type=["xlsx", "xls", "xlsm", "xltx", "csv", "xml", "txt", "json"],
+            accept_multiple_files=False,
+            key=f"central_batch_upload_{source_key}",
+            label_visibility="collapsed",
+        )
+        if uploaded is not None:
+            raw = uploaded.getvalue()
+            uploads[source_key] = {
+                "source": source,
+                "file": uploaded,
+                "raw": raw,
+                "rows_count": _count_rows(uploaded.name, raw),
+            }
+
+    if selected_sources:
+        ready = len(uploads) == len(selected_sources)
+        if not ready:
+            missing = [
+                source["name"]
+                for source in selected_sources
+                if source["source_key"] not in uploads
+            ]
+            st.caption("AGUARDANDO ARQUIVO: " + " • ".join(missing))
 
         if st.button(
-            "ATUALIZAR BASE",
+            "ATUALIZAR FONTES",
             type="primary",
             use_container_width=True,
-            key=f"save_source_{source_key}",
+            disabled=not ready,
+            key="save_selected_sources",
         ):
+            progress = st.progress(0)
+            status = st.empty()
+            total = len(selected_sources)
+            updated_names = []
             try:
-                store.save_report(
-                    source_key,
-                    uploaded.name,
-                    raw,
-                    rows_count=rows_count,
-                    origin=selected.get("source_system") or "UPLOAD",
+                for index, source in enumerate(selected_sources, start=1):
+                    item = uploads[source["source_key"]]
+                    status.write(f"Atualizando {source['name']}...")
+                    store.save_report(
+                        source["source_key"],
+                        item["file"].name,
+                        item["raw"],
+                        rows_count=item["rows_count"],
+                        origin=source.get("source_system") or "UPLOAD",
+                    )
+                    updated_names.append(source["name"])
+                    progress.progress(index / total)
+
+                status.empty()
+                progress.empty()
+                st.success(
+                    f"{len(updated_names)} fonte(s) atualizada(s): "
+                    + " • ".join(updated_names)
                 )
-                st.success("Base atualizada.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"Não foi possível atualizar a base: {exc}")
+                st.error(
+                    "Falha durante a carga. Fontes concluídas antes do erro: "
+                    + (" • ".join(updated_names) if updated_names else "nenhuma")
+                    + f". Erro: {exc}"
+                )
 
     section_band(
         "04 · PADRÃO SETTA",
