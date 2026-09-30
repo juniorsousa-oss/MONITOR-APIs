@@ -120,6 +120,38 @@ def _save_local(data: dict) -> None:
 def system_apis() -> list[dict]:
     return [
         {
+            "id": "system-central-dados",
+            "name": "CENTRAL DE DADOS SETTA",
+            "app_name": "Fontes • Bases tratadas • Integrações",
+            "endpoint": (
+                "https://cuixazpxkvniqldmmnth.supabase.co/"
+                "functions/v1/setta-data-api/health"
+            ),
+            "method": "GET",
+            "expected_status": 200,
+            "timeout_seconds": 15,
+            "warning_latency_ms": 1200,
+            "active": True,
+            "secret_ref": "__GESTAO_ENTREGAS_ANON__",
+            "system": True,
+        },
+        {
+            "id": "system-entregas-operacional",
+            "name": "GESTÃO DE ENTREGAS — OPERACIONAL",
+            "app_name": "Cronograma • Central • Sincronização",
+            "endpoint": (
+                "https://cuixazpxkvniqldmmnth.supabase.co/"
+                "functions/v1/entrega-cronograma-api/health"
+            ),
+            "method": "GET",
+            "expected_status": 200,
+            "timeout_seconds": 15,
+            "warning_latency_ms": 1200,
+            "active": True,
+            "secret_ref": "__GESTAO_ENTREGAS_ANON__",
+            "system": True,
+        },
+        {
             "id": "system-nf-materiais",
             "name": "GESTÃO DE ENTREGAS → NFs",
             "app_name": "Materiais pendentes • Impacto MRP",
@@ -135,7 +167,7 @@ def system_apis() -> list[dict]:
             "secret_ref": "__GESTAO_ENTREGAS_ANON__",
             "health_mode": "NF_MATERIAIS_STATUS",
             "system": True,
-        }
+        },
     ]
 
 
