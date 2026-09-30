@@ -12,7 +12,7 @@ from streamlit_autorefresh import st_autorefresh
 
 import data_store as store
 import monitor_logic as monitor
-from ui import api_card, derived_card, inject_css, kpi_grid, logo_html, section_band, source_card
+from ui import api_card, derived_card, inject_css, integration_card, kpi_grid, logo_html, section_band, source_card
 
 TZ = ZoneInfo("America/Sao_Paulo")
 VISUAL_CONFIG = store.load_visual_config()
@@ -179,10 +179,11 @@ def render_api_registration() -> None:
 def render_monitor() -> None:
     raw_apis = store.list_apis(include_demo=True)
     apis = monitor.hydrate_all(raw_apis)
+    integrations = store.list_integrations()
 
     render_header(
         "MONITOR DE APIs | SETTA",
-        "Integrações • Disponibilidade • Desempenho",
+        "APIS • INTEGRAÇÕES • DISPONIBILIDADE",
         _monitor_pill(apis),
     )
 
@@ -191,31 +192,41 @@ def render_monitor() -> None:
     attention = sum(1 for x in active if str(x.get("status")).upper() == "ATENÇÃO")
     offline = sum(1 for x in active if str(x.get("status")).upper() == "OFFLINE")
 
+    integration_online = sum(
+        1 for item in integrations if str(item.get("status")).upper() == "ONLINE"
+    )
+    integration_attention = sum(
+        1 for item in integrations if str(item.get("status")).upper() == "ATENÇÃO"
+    )
+    integration_offline = sum(
+        1 for item in integrations if str(item.get("status")).upper() == "OFFLINE"
+    )
+
     kpi_grid(
         [
             {
-                "label": "APIs cadastradas",
-                "value": len(apis),
+                "label": "APIs / serviços",
+                "value": len(active),
+                "note": f"{online} online",
+                "accent": "#111827",
+            },
+            {
+                "label": "Serviços online",
+                "value": online,
+                "note": f"{attention} atenção • {offline} offline",
+                "accent": "#22c55e" if offline == 0 else "#ef4444",
+            },
+            {
+                "label": "Integrações",
+                "value": len(integrations),
                 "note": "",
                 "accent": "#111827",
             },
             {
-                "label": "Online",
-                "value": online,
-                "note": "",
-                "accent": "#22c55e",
-            },
-            {
-                "label": "Atenção",
-                "value": attention,
-                "note": "",
-                "accent": "#f59e0b",
-            },
-            {
-                "label": "Offline",
-                "value": offline,
-                "note": "",
-                "accent": "#ef4444",
+                "label": "Integrações OK",
+                "value": integration_online,
+                "note": f"{integration_attention} atenção • {integration_offline} offline",
+                "accent": "#22c55e" if integration_offline == 0 else "#ef4444",
             },
         ]
     )
@@ -239,8 +250,8 @@ def render_monitor() -> None:
     render_api_registration()
 
     section_band(
-        "01 · DISPONIBILIDADE",
-        "INTEGRAÇÕES MONITORADAS",
+        "01 · SERVIÇOS",
+        "APIS E ENDPOINTS",
         "",
     )
     st.markdown(
@@ -288,12 +299,37 @@ def render_monitor() -> None:
                     store.delete_api(str(selected.get("id")))
                     st.rerun()
 
+    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
     section_band(
-        "02 · OCORRÊNCIAS",
+        "02 · INTEGRAÇÕES",
+        "FLUXOS ENTRE APLICATIVOS",
+        "",
+    )
+    st.markdown(
+        '<div class="integration-grid">'
+        + "".join(integration_card(item) for item in integrations)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
+    section_band(
+        "03 · OCORRÊNCIAS",
         "INCIDENTES RECENTES",
         "",
     )
     incidents = store.list_incidents(limit=12)
+    for item in integrations:
+        if str(item.get("status")).upper() in {"OFFLINE", "ATENÇÃO"}:
+            incidents = [
+                {
+                    "started_at": item.get("last_activity_at"),
+                    "api_name": item.get("name"),
+                    "kind": "INTEGRAÇÃO",
+                    "status": "ABERTO",
+                    "resolved_at": None,
+                }
+            ] + incidents
     for api in apis:
         if api.get("system") and str(api.get("status")).upper() in {"OFFLINE", "ATENÇÃO"}:
             incidents = [
