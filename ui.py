@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import html
 from pathlib import Path
 
@@ -110,7 +111,8 @@ def inject_css() -> None:
 
 def logo_html() -> str:
     if LOGO_FILE.exists():
-        return LOGO_FILE.read_text(encoding="utf-8")
+        encoded = base64.b64encode(LOGO_FILE.read_bytes()).decode()
+        return f'<img src="data:image/svg+xml;base64,{encoded}" alt="Logo SETTA">'
     return '<b style="font-size:2rem;letter-spacing:.08em">SETTA</b>'
 
 
