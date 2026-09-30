@@ -95,18 +95,27 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 .source-meta{font-size:.74rem;color:#667085;line-height:1.55}
 .source-apps{margin-top:.65rem;padding-top:.55rem;border-top:1px solid #edf0f3;color:#475569;font-size:.69rem;line-height:1.45}
 .source-badge{display:inline-flex;border-radius:999px;padding:.22rem .46rem;font-size:.64rem;font-weight:800;background:#f1f5f9;color:#475569;white-space:nowrap}
+.source-origin{margin-top:.45rem;display:flex;gap:.42rem;flex-wrap:wrap}
+.source-chip{display:inline-flex;align-items:center;border:1px solid #e5e7eb;background:#f8fafc;border-radius:999px;padding:.2rem .44rem;font-size:.6rem;font-weight:800;color:#475569}
+.derived-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem;margin:.3rem 0 1rem}
+.derived-card{position:relative;background:#fff;border:1px solid #dfe3e8;border-radius:12px;padding:.95rem 1rem;box-shadow:0 3px 12px rgba(15,23,42,.035);overflow:hidden;min-height:155px}
+.derived-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:#111827}
+.derived-name{font-size:.8rem;font-weight:900;color:#111827;text-transform:uppercase;margin-bottom:.32rem}
+.derived-meta{font-size:.7rem;color:#667085;line-height:1.55}
+.derived-deps{margin-top:.6rem;padding-top:.55rem;border-top:1px solid #edf0f3;font-size:.68rem;color:#475569;line-height:1.5}
+.derived-mode{position:absolute;right:.8rem;top:.8rem;border-radius:999px;padding:.22rem .46rem;font-size:.61rem;font-weight:900;background:#eef2ff;color:#3730a3;border:1px solid #e0e7ff}
 
 .notice{border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:10px;padding:.72rem .85rem;font-size:.75rem;line-height:1.45;margin:.6rem 0 1rem}
 .ok-notice{border-color:#bbf7d0;background:#f0fdf4;color:#166534}
 .footer{text-align:center;color:#9298a1;font-size:.72rem;padding-top:1.2rem}
 
-@media (max-width:1100px){.api-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.source-grid{grid-template-columns:1fr}}
+@media (max-width:1100px){.api-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.source-grid,.derived-grid{grid-template-columns:1fr}}
 @media (max-width:900px){
 .api-source-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .block-container{padding-top:2rem!important;padding-left:1rem!important;padding-right:1rem!important;padding-bottom:2rem!important}
 .setta-logo-card{min-height:105px;margin-bottom:1.8rem;padding:.9rem 1rem}.setta-logo-card img{max-width:170px;max-height:72px}
 .app-head{flex-direction:column;gap:.7rem}.app-title{font-size:2rem!important}
-.kpi-grid,.api-grid,.source-grid{grid-template-columns:1fr!important}
+.kpi-grid,.api-grid,.source-grid,.derived-grid{grid-template-columns:1fr!important}
 .table-row{grid-template-columns:1fr!important}.table-head{display:none!important}
 .table-cell{border-right:0!important;border-bottom:1px solid #eef0f3;justify-content:flex-start!important}
 .table-cell::before{content:attr(data-label);display:inline-block;min-width:108px;margin-right:.65rem;font-size:.62rem;font-weight:900;text-transform:uppercase;color:#64748b}
@@ -243,7 +252,18 @@ def api_card(api: dict) -> str:
 
 def source_card(source: dict) -> str:
     status = str(source.get("status") or "AGUARDANDO").upper()
-    accent = "#22c55e" if status == "ATUALIZADO" else "#f59e0b" if status == "ATENÇÃO" else "#64748b"
+    accent = (
+        "#22c55e"
+        if status == "ATUALIZADO"
+        else "#f59e0b"
+        if status == "ATENÇÃO"
+        else "#64748b"
+    )
+    api_chip = (
+        '<span class="source-chip">API PLANEJADA</span>'
+        if source.get("api_plan")
+        else ""
+    )
     return (
         '<div class="source-card" '
         f'style="--source-accent:{accent}">'
@@ -251,10 +271,29 @@ def source_card(source: dict) -> str:
         f'<div class="source-name">{esc(source.get("name"))}</div>'
         '<div class="source-meta">'
         f'Última atualização: <b>{esc(source.get("last_update_label") or "Nunca")}</b><br>'
-        f'Registros: <b>{esc(source.get("rows_count") or 0)}</b><br>'
-        f'Origem: <b>{esc(source.get("origin") or "Manual")}</b>'
+        f'Registros: <b>{esc(source.get("rows_count") or 0)}</b>'
         '</div></div>'
         f'<div class="source-badge">{esc(status)}</div></div>'
-        f'<div class="source-apps"><b>Utilizado por:</b> {esc(source.get("apps") or "A definir")}</div>'
+        '<div class="source-origin">'
+        f'<span class="source-chip">{esc(source.get("source_system") or "—")}</span>'
+        f'<span class="source-chip">{esc(source.get("mode") or "UPLOAD CENTRAL")}</span>'
+        f'{api_chip}'
+        '</div>'
+        f'<div class="source-apps"><b>Usado por:</b> {esc(source.get("apps") or "A definir")}</div>'
+        '</div>'
+    )
+
+
+def derived_card(base: dict) -> str:
+    dependencies = " • ".join(base.get("depends_on") or [])
+    return (
+        '<div class="derived-card">'
+        f'<div class="derived-mode">{esc(base.get("mode") or "AUTOMÁTICO")}</div>'
+        f'<div class="derived-name">{esc(base.get("name"))}</div>'
+        '<div class="derived-meta">'
+        f'Gerado por: <b>{esc(base.get("producer") or "—")}</b><br>'
+        f'Usado por: <b>{esc(base.get("apps") or "—")}</b>'
+        '</div>'
+        f'<div class="derived-deps"><b>Depende de:</b> {esc(dependencies)}</div>'
         '</div>'
     )
