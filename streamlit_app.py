@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
 import io
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+from PIL import Image
 from streamlit_autorefresh import st_autorefresh
 
 import data_store as store
@@ -13,10 +15,25 @@ import monitor_logic as monitor
 from ui import api_card, inject_css, kpi_grid, logo_html, section_band, source_card
 
 TZ = ZoneInfo("America/Sao_Paulo")
+VISUAL_CONFIG = store.load_visual_config()
+
+
+def browser_icon():
+    data = str(VISUAL_CONFIG.get("favicon_data") or "").strip()
+    if not data:
+        return "📡"
+    try:
+        raw = base64.b64decode(data, validate=True)
+        image = Image.open(io.BytesIO(raw))
+        image.load()
+        return image
+    except Exception:
+        return "📡"
+
 
 st.set_page_config(
     page_title="MONITOR DE APIs | SETTA",
-    page_icon="📡",
+    page_icon=browser_icon(),
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -29,13 +46,11 @@ st_autorefresh(interval=30_000, limit=None, key="setta_monitor_refresh")
 def render_sidebar() -> str:
     with st.sidebar:
         st.markdown(
-            """
-            <div class="sidebar-brand">
-                <div class="sidebar-brand-title">MONITOR DE APIs</div>
-                <div class="sidebar-brand-sub">Central operacional SETTA</div>
-            </div>
-            <div class="sidebar-section-label">Navegação</div>
-            """,
+            '<div class="sidebar-brand">'
+            '<div class="sidebar-brand-title">MONITOR DE APIs</div>'
+            '<div class="sidebar-brand-sub">Central operacional SETTA</div>'
+            '</div>'
+            '<div class="sidebar-section-label">Navegação</div>',
             unsafe_allow_html=True,
         )
         page = st.radio(
@@ -43,7 +58,82 @@ def render_sidebar() -> str:
             ["Monitor de APIs", "Banco de Dados"],
             label_visibility="collapsed",
         )
+
         st.markdown("---")
+        with st.expander("PERSONALIZAÇÃO", expanded=False):
+            st.caption("Logo do cabeçalho")
+            current_logo = logo_html(
+                str(VISUAL_CONFIG.get("logo_data") or ""),
+                str(VISUAL_CONFIG.get("logo_mime") or "image/svg+xml"),
+            )
+            st.markdown(
+                f'<div class="sidebar-logo-preview">{current_logo}</div>',
+                unsafe_allow_html=True,
+            )
+            logo_file = st.file_uploader(
+                "Alterar logo",
+                type=["png", "jpg", "jpeg", "webp", "svg"],
+                key="visual_logo_file",
+                label_visibility="collapsed",
+            )
+
+            st.caption("Ícone do navegador")
+            favicon_file = st.file_uploader(
+                "Alterar ícone",
+                type=["png", "jpg", "jpeg", "ico"],
+                key="visual_favicon_file",
+                label_visibility="collapsed",
+            )
+
+            save_col, reset_col = st.columns(2)
+            if save_col.button(
+                "SALVAR",
+                type="primary",
+                use_container_width=True,
+                key="save_visual_config",
+            ):
+                if logo_file is None and favicon_file is None:
+                    st.warning("Selecione a logo ou o ícone que deseja alterar.")
+                else:
+                    try:
+                        kwargs = {}
+                        if logo_file is not None:
+                            if len(logo_file.getvalue()) > 2 * 1024 * 1024:
+                                raise ValueError("A logo deve ter no máximo 2 MB.")
+                            kwargs["logo_data"] = base64.b64encode(
+                                logo_file.getvalue()
+                            ).decode()
+                            kwargs["logo_mime"] = (
+                                logo_file.type or "image/png"
+                            )
+                        if favicon_file is not None:
+                            if len(favicon_file.getvalue()) > 1 * 1024 * 1024:
+                                raise ValueError(
+                                    "O ícone deve ter no máximo 1 MB."
+                                )
+                            raw_icon = favicon_file.getvalue()
+                            image = Image.open(io.BytesIO(raw_icon))
+                            image.verify()
+                            kwargs["favicon_data"] = base64.b64encode(
+                                raw_icon
+                            ).decode()
+                            kwargs["favicon_mime"] = (
+                                favicon_file.type or "image/png"
+                            )
+                        store.save_visual_config(**kwargs)
+                        st.success("Identidade visual atualizada.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Não foi possível salvar: {exc}")
+
+            if reset_col.button(
+                "PADRÃO",
+                use_container_width=True,
+                key="reset_visual_config",
+            ):
+                store.reset_visual_config()
+                st.rerun()
+
         if store.supabase_enabled():
             st.success("Banco central conectado", icon="✓")
         else:
@@ -53,25 +143,26 @@ def render_sidebar() -> str:
 
 
 def render_logo() -> None:
+    image = logo_html(
+        str(VISUAL_CONFIG.get("logo_data") or ""),
+        str(VISUAL_CONFIG.get("logo_mime") or "image/svg+xml"),
+    )
     st.markdown(
-        f'<div class="setta-logo-card">{logo_html()}</div>',
+        f'<div class="setta-logo-card">{image}</div>',
         unsafe_allow_html=True,
     )
 
 
 def render_header(title: str, subtitle: str, pill: str) -> None:
-    st.markdown(
-        f"""
-        <div class="app-head">
-            <div>
-                <div class="app-title">{title}</div>
-                <div class="app-sub">{subtitle}</div>
-            </div>
-            <div class="system-pill"><span class="pulse"></span>{pill}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    markup = (
+        '<div class="app-head"><div>'
+        f'<div class="app-title">{title}</div>'
+        f'<div class="app-sub">{subtitle}</div>'
+        '</div>'
+        f'<div class="system-pill"><span class="pulse"></span>{pill}</div>'
+        '</div>'
     )
+    st.markdown(markup, unsafe_allow_html=True)
 
 
 def _count_rows(name: str, raw: bytes) -> int:
@@ -161,7 +252,7 @@ def render_monitor() -> None:
     apis = monitor.hydrate_all(raw_apis)
 
     render_header(
-        "MONITOR DE APIs",
+        "MONITOR DE APIs | SETTA",
         "Disponibilidade • Integrações • Desempenho • Histórico operacional",
         _monitor_pill(apis),
     )
@@ -309,7 +400,7 @@ def render_monitor() -> None:
 
 def render_database() -> None:
     render_header(
-        "BANCO DE DADOS",
+        "BANCO DE DADOS | SETTA",
         "Central de alimentação • Histórico • Fontes compartilhadas entre os aplicativos SETTA",
         "CENTRAL DE DADOS",
     )
