@@ -40,11 +40,15 @@ st.set_page_config(
 inject_css()
 
 # A tela apenas lê os resultados. O worker é responsável pelos testes das APIs.
-st_autorefresh(interval=30_000, limit=None, key="setta_monitor_refresh")
 
 
 def render_sidebar() -> str:
     with st.sidebar:
+        st_autorefresh(
+            interval=30_000,
+            limit=None,
+            key="setta_monitor_refresh",
+        )
         st.markdown(
             '<div class="sidebar-brand">'
             '<div class="sidebar-brand-title">MONITOR DE APIs</div>'
