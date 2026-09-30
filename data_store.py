@@ -605,7 +605,7 @@ def load_visual_config() -> dict:
     try:
         row = central_api_call(
             "visual_get",
-            {"app_key": "monitor_apis"},
+            {"app_key": "setta_global"},
             timeout=30,
         ).get("data") or {}
         return {
@@ -638,7 +638,7 @@ def save_visual_config(
         row = central_api_call(
             "visual_set",
             {
-                "app_key": "monitor_apis",
+                "app_key": "setta_global",
                 **current,
             },
             timeout=30,
