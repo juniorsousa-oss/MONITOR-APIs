@@ -12,7 +12,8 @@ from streamlit_autorefresh import st_autorefresh
 
 import data_store as store
 import monitor_logic as monitor
-from ui import api_card, derived_card, inject_css, integration_card, kpi_grid, logo_html, section_band, source_card
+from ui import api_card, derived_card, inject_css, kpi_grid, logo_html, section_band, source_card
+import ui as ui_components
 
 TZ = ZoneInfo("America/Sao_Paulo")
 VISUAL_CONFIG = store.load_visual_config()
@@ -307,7 +308,7 @@ def render_monitor() -> None:
     )
     st.markdown(
         '<div class="integration-grid">'
-        + "".join(integration_card(item) for item in integrations)
+        + "".join(ui_components.integration_card(item) for item in integrations)
         + "</div>",
         unsafe_allow_html=True,
     )
