@@ -282,11 +282,168 @@ def resolve_incidents(api_id: str) -> None:
     _save_local(data)
 
 
-DEFAULT_SOURCES = [
-    {"key": "cadastros", "name": "CADASTRO DE MATERIAIS", "apps": "MRP • Compra Fácil • Fechamento Mensal"},
-    {"key": "estoque", "name": "ESTOQUE", "apps": "MRP • Gestão de Entregas • Inventários"},
-    {"key": "relatorio_geral", "name": "RELATÓRIO GERAL", "apps": "MRP • PCP • Suprimentos"},
-    {"key": "planejamento_pcp", "name": "PLANEJAMENTO PCP", "apps": "MRP • Gestão de Entregas"},
+SOURCE_CATALOG = [
+    {
+        "key": "relatorio_geral",
+        "name": "RELATÓRIO GERAL",
+        "source_system": "MES",
+        "apps": "Conversor MRP • Gestão de Equipes",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "for001",
+        "name": "FOR001",
+        "source_system": "PLANILHA MANUAL",
+        "apps": "Conversor MRP",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "for022",
+        "name": "FOR022",
+        "source_system": "PLANILHA MANUAL",
+        "apps": "Conversor MRP • Gestão de Entregas • Gestão de Equipes",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "analitico",
+        "name": "ANALÍTICO",
+        "source_system": "PROTHEUS",
+        "apps": "Conversor MRP • Fechamento Mensal • Inventário Rotativo",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "endereco",
+        "name": "ENDEREÇO",
+        "source_system": "PROTHEUS",
+        "apps": "Conversor MRP • Inventário Rotativo",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "sc",
+        "name": "S.C",
+        "source_system": "PROTHEUS",
+        "apps": "Conversor MRP",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "pc",
+        "name": "P.C",
+        "source_system": "PROTHEUS",
+        "apps": "Conversor MRP",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "pre_nota",
+        "name": "PRÉ NOTA",
+        "source_system": "PROTHEUS",
+        "apps": "Conversor MRP",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "pmp",
+        "name": "PMP",
+        "source_system": "OUTRO APP",
+        "apps": "Conversor MRP",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "h001",
+        "name": "H001",
+        "source_system": "PLANILHA MANUAL",
+        "apps": "Conversor MRP",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "cadastros",
+        "name": "CADASTROS",
+        "source_system": "PROTHEUS",
+        "apps": "MRP • Gestão de Equipes",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "nf",
+        "name": "NF",
+        "source_system": "PROTHEUS",
+        "apps": "Gestão de Entregas • Controle de NFs",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "mes_pre_notas",
+        "name": "MES PRÉ NOTAS",
+        "source_system": "MES",
+        "apps": "Controle de NFs",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+]
+
+DERIVED_CATALOG = [
+    {
+        "key": "relatorio_geral_tratado",
+        "name": "RELATÓRIO GERAL TRATADO",
+        "producer": "Conversor MRP",
+        "depends_on": ["RELATÓRIO GERAL", "FOR001", "FOR022"],
+        "apps": "MRP",
+        "mode": "AUTOMÁTICO",
+    },
+    {
+        "key": "estoque_tratado",
+        "name": "ESTOQUE TRATADO",
+        "producer": "Conversor MRP",
+        "depends_on": ["ANALÍTICO", "ENDEREÇO"],
+        "apps": "MRP",
+        "mode": "AUTOMÁTICO",
+    },
+    {
+        "key": "compras_tratado",
+        "name": "COMPRAS TRATADO",
+        "producer": "Conversor MRP",
+        "depends_on": ["S.C", "P.C", "PRÉ NOTA"],
+        "apps": "MRP",
+        "mode": "AUTOMÁTICO",
+    },
+    {
+        "key": "tctp_tratado",
+        "name": "TCTP TRATADO",
+        "producer": "Conversor MRP",
+        "depends_on": ["PMP", "H001"],
+        "apps": "MRP",
+        "mode": "AUTOMÁTICO",
+    },
+    {
+        "key": "relatorio_mrp",
+        "name": "RELATÓRIO MRP",
+        "producer": "MRP",
+        "depends_on": [
+            "CADASTROS",
+            "RELATÓRIO GERAL TRATADO",
+            "ESTOQUE TRATADO",
+            "COMPRAS TRATADO",
+            "TCTP TRATADO",
+        ],
+        "apps": "Gestão de Entregas • Gestão de Equipes",
+        "mode": "AUTOMÁTICO",
+    },
+    {
+        "key": "materiais_api",
+        "name": "MATERIAIS",
+        "producer": "Gestão de Entregas",
+        "depends_on": ["FOR022", "RELATÓRIO MRP", "NF"],
+        "apps": "Controle de NFs",
+        "mode": "API ATIVA",
+    },
 ]
 
 
@@ -303,26 +460,33 @@ def list_sources() -> list[dict]:
 
     by_key = {x.get("source_key"): x for x in saved}
     result = []
-    for base in DEFAULT_SOURCES:
+    for base in SOURCE_CATALOG:
         row = by_key.get(base["key"], {})
         merged = {
             "source_key": base["key"],
             "name": base["name"],
             "apps": base["apps"],
+            "source_system": base["source_system"],
+            "mode": row.get("mode") or base["mode"],
+            "api_plan": bool(base.get("api_plan")),
             "status": row.get("status") or "AGUARDANDO",
             "last_update_at": row.get("last_update_at"),
             "rows_count": row.get("rows_count") or 0,
-            "origin": row.get("origin") or "Manual",
+            "origin": row.get("origin") or base["source_system"],
             "last_file_name": row.get("last_file_name") or "",
         }
         result.append(merged)
     return result
 
 
+def list_derived_bases() -> list[dict]:
+    return [dict(item) for item in DERIVED_CATALOG]
+
+
 def save_report(source_key: str, file_name: str, raw: bytes, rows_count: int = 0, origin: str = "UPLOAD") -> dict:
     stamp = datetime.now(TZ).strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c for c in Path(file_name).name if c.isalnum() or c in "._- ")
-    storage_path = f"{source_key}/{stamp}_{safe_name}"
+    storage_path = f"current/{source_key}"
     now = now_iso()
     client = get_client()
 
@@ -332,12 +496,12 @@ def save_report(source_key: str, file_name: str, raw: bytes, rows_count: int = 0
             file=io.BytesIO(raw),
             file_options={
                 "content-type": "application/octet-stream",
-                "upsert": "false",
+                "upsert": "true",
             },
         )
         source_row = {
             "source_key": source_key,
-            "name": next((x["name"] for x in DEFAULT_SOURCES if x["key"] == source_key), source_key.upper()),
+            "name": next((x["name"] for x in SOURCE_CATALOG if x["key"] == source_key), source_key.upper()),
             "status": "ATUALIZADO",
             "last_update_at": now,
             "rows_count": int(rows_count),
@@ -346,19 +510,11 @@ def save_report(source_key: str, file_name: str, raw: bytes, rows_count: int = 0
             "updated_at": now,
         }
         client.table("data_sources").upsert(source_row, on_conflict="source_key").execute()
-        saved = client.table("data_imports").insert({
-            "source_key": source_key,
-            "file_name": file_name,
-            "storage_path": storage_path,
-            "rows_count": int(rows_count),
-            "origin": origin,
-            "imported_at": now,
-        }).execute().data or []
-        return saved[0] if saved else source_row
+        return source_row
 
     folder = UPLOAD_DIR / source_key
     folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{stamp}_{safe_name}"
+    target = folder / "current"
     target.write_bytes(raw)
     data = _load_local()
     source = next((x for x in data["sources"] if x.get("source_key") == source_key), None)
@@ -374,11 +530,13 @@ def save_report(source_key: str, file_name: str, raw: bytes, rows_count: int = 0
     except ValueError:
         local_storage_path = str(target)
     row = {
-        "id": str(uuid.uuid4()), "source_key": source_key, "file_name": file_name,
-        "storage_path": local_storage_path, "rows_count": int(rows_count),
-        "origin": origin, "imported_at": now,
+        "source_key": source_key,
+        "file_name": file_name,
+        "storage_path": local_storage_path,
+        "rows_count": int(rows_count),
+        "origin": origin,
+        "updated_at": now,
     }
-    data["imports"].append(row)
     _save_local(data)
     return row
 
