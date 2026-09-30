@@ -55,7 +55,14 @@ def get_client():
 
 
 def _default_local() -> dict:
-    return {"apis": [], "checks": [], "incidents": [], "sources": [], "imports": []}
+    return {
+        "apis": [],
+        "checks": [],
+        "incidents": [],
+        "sources": [],
+        "imports": [],
+        "visual_config": {},
+    }
 
 
 def _load_local() -> dict:
@@ -426,3 +433,83 @@ def list_imports(source_key: str | None = None, limit: int = 100) -> list[dict]:
     if source_key:
         rows = [x for x in rows if x.get("source_key") == source_key]
     return sorted(rows, key=lambda x: x.get("imported_at", ""), reverse=True)[:limit]
+
+
+def load_visual_config() -> dict:
+    client = get_client()
+    if client:
+        try:
+            rows = (
+                client.table("app_visual_config")
+                .select("*")
+                .eq("config_key", "default")
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if rows:
+                row = rows[0]
+                return {
+                    "logo_data": row.get("logo_data") or "",
+                    "logo_mime": row.get("logo_mime") or "image/png",
+                    "favicon_data": row.get("favicon_data") or "",
+                    "favicon_mime": row.get("favicon_mime") or "image/png",
+                }
+        except Exception:
+            pass
+    return dict(_load_local().get("visual_config") or {})
+
+
+def save_visual_config(
+    logo_data: str | None = None,
+    logo_mime: str | None = None,
+    favicon_data: str | None = None,
+    favicon_mime: str | None = None,
+) -> dict:
+    current = load_visual_config()
+    if logo_data is not None:
+        current["logo_data"] = logo_data
+    if logo_mime is not None:
+        current["logo_mime"] = logo_mime
+    if favicon_data is not None:
+        current["favicon_data"] = favicon_data
+    if favicon_mime is not None:
+        current["favicon_mime"] = favicon_mime
+
+    client = get_client()
+    if client:
+        payload = {
+            "config_key": "default",
+            "logo_data": current.get("logo_data") or "",
+            "logo_mime": current.get("logo_mime") or "image/png",
+            "favicon_data": current.get("favicon_data") or "",
+            "favicon_mime": current.get("favicon_mime") or "image/png",
+            "updated_at": now_iso(),
+        }
+        client.table("app_visual_config").upsert(
+            payload,
+            on_conflict="config_key",
+        ).execute()
+        return current
+
+    data = _load_local()
+    data["visual_config"] = current
+    _save_local(data)
+    return current
+
+
+def reset_visual_config() -> None:
+    client = get_client()
+    if client:
+        try:
+            client.table("app_visual_config").delete().eq(
+                "config_key", "default"
+            ).execute()
+        except Exception:
+            pass
+        return
+
+    data = _load_local()
+    data["visual_config"] = {}
+    _save_local(data)
