@@ -83,66 +83,25 @@ def _save_local(data: dict) -> None:
     LOCAL_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def demo_apis() -> list[dict]:
-    now = datetime.now(TZ)
+def system_apis() -> list[dict]:
     return [
         {
-            "id": "demo-protheus",
-            "name": "API PROTHEUS",
-            "app_name": "ERP / Integrações",
-            "endpoint": "",
+            "id": "system-nf-materiais",
+            "name": "API MATERIAIS",
+            "app_name": "Gestão de Entregas → Controle de NFs",
+            "endpoint": (
+                "https://cuixazpxkvniqldmmnth.supabase.co/"
+                "functions/v1/nf-materiais-api/status"
+            ),
             "method": "GET",
             "expected_status": 200,
-            "timeout_seconds": 10,
+            "timeout_seconds": 15,
+            "warning_latency_ms": 1500,
             "active": True,
-            "status": "ONLINE",
-            "latency_ms": 182,
-            "http_status": 200,
-            "uptime_24h": 100.0,
-            "consecutive_failures": 0,
-            "last_check_at": (now - timedelta(seconds=20)).isoformat(),
-            "last_success_at": (now - timedelta(seconds=20)).isoformat(),
-            "latency_history": [154, 169, 145, 181, 176, 163, 188, 172, 179, 182],
-            "demo": True,
-        },
-        {
-            "id": "demo-pcp",
-            "name": "API PCP",
-            "app_name": "Planejamento e Produção",
-            "endpoint": "",
-            "method": "GET",
-            "expected_status": 200,
-            "timeout_seconds": 10,
-            "active": True,
-            "status": "ATENÇÃO",
-            "latency_ms": 1280,
-            "http_status": 200,
-            "uptime_24h": 99.82,
-            "consecutive_failures": 0,
-            "last_check_at": (now - timedelta(seconds=21)).isoformat(),
-            "last_success_at": (now - timedelta(seconds=21)).isoformat(),
-            "latency_history": [190, 210, 205, 260, 370, 620, 890, 1120, 1390, 1280],
-            "demo": True,
-        },
-        {
-            "id": "demo-estoque",
-            "name": "API ESTOQUE",
-            "app_name": "MRP / Almoxarifado",
-            "endpoint": "",
-            "method": "GET",
-            "expected_status": 200,
-            "timeout_seconds": 10,
-            "active": True,
-            "status": "OFFLINE",
-            "latency_ms": None,
-            "http_status": 500,
-            "uptime_24h": 96.20,
-            "consecutive_failures": 4,
-            "last_check_at": (now - timedelta(seconds=22)).isoformat(),
-            "last_success_at": (now - timedelta(minutes=8)).isoformat(),
-            "latency_history": [180, 192, 210, 330, 540, 910, 1510, 1900],
-            "demo": True,
-        },
+            "secret_ref": "__GESTAO_ENTREGAS_ANON__",
+            "health_mode": "NF_MATERIAIS_STATUS",
+            "system": True,
+        }
     ]
 
 
@@ -156,9 +115,11 @@ def list_apis(include_demo: bool = True) -> list[dict]:
             rows = []
     else:
         rows = _load_local()["apis"]
-    if rows or not include_demo:
-        return rows
-    return demo_apis()
+
+    systems = system_apis()
+    system_ids = {str(item.get("id")) for item in systems}
+    custom = [row for row in rows if str(row.get("id")) not in system_ids]
+    return systems + custom
 
 
 def save_api(payload: dict) -> dict:
@@ -203,7 +164,7 @@ def save_api(payload: dict) -> dict:
 
 
 def delete_api(api_id: str) -> None:
-    if str(api_id).startswith("demo-"):
+    if str(api_id).startswith("system-"):
         return
     client = get_client()
     if client:
