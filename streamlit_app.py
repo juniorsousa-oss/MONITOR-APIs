@@ -138,7 +138,7 @@ def render_sidebar() -> str:
             st.success("Banco central conectado", icon="✓")
         else:
             st.info("Modo local de validação", icon="ℹ")
-        st.caption("Atualização visual automática a cada 30 segundos.")
+        st.caption("Atualização automática · 30 s")
     return page
 
 
@@ -182,7 +182,7 @@ def _count_rows(name: str, raw: bytes) -> int:
 def _monitor_pill(apis: list[dict]) -> str:
     real = [x for x in apis if not x.get("demo")]
     if not real:
-        return "MODO DEMONSTRAÇÃO"
+        return "SEM APIs"
     dates = [store.parse_dt(x.get("last_check_at")) for x in real]
     dates = [x for x in dates if x]
     if not dates:
@@ -193,10 +193,6 @@ def _monitor_pill(apis: list[dict]) -> str:
 
 def render_api_registration() -> None:
     with st.expander("CADASTRAR NOVA API", expanded=False):
-        st.caption(
-            "O token não é salvo no cadastro. Para APIs autenticadas, informe apenas "
-            "o nome de uma variável de ambiente em 'Referência do segredo'."
-        )
         with st.form("api_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             name = c1.text_input("Nome da API", placeholder="API PROTHEUS")
@@ -217,7 +213,7 @@ def render_api_registration() -> None:
             secret_ref = c7.text_input(
                 "Referência do segredo",
                 placeholder="PROTHEUS_API_HEADERS",
-                help="Nome da variável de ambiente. O valor pode ser um token ou um JSON de headers.",
+                help="Variável de ambiente com o token ou headers.",
             )
             active = st.checkbox("Monitoramento ativo", value=True)
             submitted = st.form_submit_button(
@@ -241,7 +237,7 @@ def render_api_registration() -> None:
                         "active": active,
                     }
                 )
-                st.success("API cadastrada. O worker passará a monitorá-la no próximo ciclo.")
+                st.success("API cadastrada.")
                 st.rerun()
             except Exception as exc:
                 st.error(f"Não foi possível salvar a API: {exc}")
@@ -253,20 +249,9 @@ def render_monitor() -> None:
 
     render_header(
         "MONITOR DE APIs | SETTA",
-        "Disponibilidade • Integrações • Desempenho • Histórico operacional",
+        "Integrações • Disponibilidade • Desempenho",
         _monitor_pill(apis),
     )
-
-    if apis and all(x.get("demo") for x in apis):
-        st.markdown(
-            """
-            <div class="notice">
-                <b>Modo de demonstração.</b> Estes três cartões servem somente para validar o layout.
-                Assim que a primeira API real for cadastrada, os exemplos deixam de aparecer.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
     active = [x for x in apis if str(x.get("status")).upper() != "DESATIVADA"]
     online = sum(1 for x in active if str(x.get("status")).upper() == "ONLINE")
@@ -278,31 +263,31 @@ def render_monitor() -> None:
             {
                 "label": "APIs cadastradas",
                 "value": len(apis),
-                "note": "Integrações visíveis",
+                "note": "",
                 "accent": "#111827",
             },
             {
                 "label": "Online",
                 "value": online,
-                "note": "Operação normal",
+                "note": "",
                 "accent": "#22c55e",
             },
             {
                 "label": "Atenção",
                 "value": attention,
-                "note": "Degradação / latência",
+                "note": "",
                 "accent": "#f59e0b",
             },
             {
                 "label": "Offline",
                 "value": offline,
-                "note": "Exigem tratativa",
+                "note": "",
                 "accent": "#ef4444",
             },
         ]
     )
 
-    real_apis = [x for x in raw_apis if not x.get("demo")]
+    real_apis = list(raw_apis)
     b1, b2 = st.columns([1, 1])
     if b1.button(
         "VERIFICAR TODAS AGORA",
@@ -323,7 +308,7 @@ def render_monitor() -> None:
     section_band(
         "01 · DISPONIBILIDADE",
         "INTEGRAÇÕES MONITORADAS",
-        "Cada cartão concentra status, HTTP, latência, uptime e a última comunicação registrada.",
+        "",
     )
     st.markdown(
         '<div class="api-grid">' + "".join(api_card(api) for api in apis) + "</div>",
@@ -360,14 +345,15 @@ def render_monitor() -> None:
             else:
                 st.info("Ainda não existem verificações gravadas para esta API.")
 
-            if st.button("EXCLUIR API SELECIONADA", type="secondary"):
-                store.delete_api(str(selected.get("id")))
-                st.rerun()
+            if not selected.get("system"):
+                if st.button("EXCLUIR API SELECIONADA", type="secondary"):
+                    store.delete_api(str(selected.get("id")))
+                    st.rerun()
 
     section_band(
         "02 · OCORRÊNCIAS",
         "INCIDENTES RECENTES",
-        "Falhas de comunicação e degradações permanecem registradas até a normalização.",
+        "",
     )
     incidents = store.list_incidents(limit=12)
     if incidents:
@@ -392,8 +378,6 @@ def render_monitor() -> None:
             )
         rows.append("</div>")
         st.markdown("".join(rows), unsafe_allow_html=True)
-    elif apis and all(x.get("demo") for x in apis):
-        st.info("Os incidentes reais aparecerão aqui depois do cadastro e monitoramento das APIs.")
     else:
         st.success("Nenhum incidente registrado.")
 
@@ -401,26 +385,14 @@ def render_monitor() -> None:
 def render_database() -> None:
     render_header(
         "BANCO DE DADOS | SETTA",
-        "Central de alimentação • Histórico • Fontes compartilhadas entre os aplicativos SETTA",
+        "Fontes • Alimentação • Histórico",
         "CENTRAL DE DADOS",
     )
 
-    if not store.supabase_enabled():
-        st.markdown(
-            """
-            <div class="notice">
-                <b>Validação local ativa.</b> Os uploads funcionam para teste nesta instância.
-                Para que todos os aplicativos consumam a mesma base de forma permanente,
-                configure o Supabase e execute o arquivo <b>supabase_schema.sql</b>.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    if store.supabase_enabled():
+        st.caption("Banco central conectado")
     else:
-        st.markdown(
-            '<div class="notice ok-notice"><b>Banco central conectado.</b> Metadados e arquivos são persistidos no Supabase.</div>',
-            unsafe_allow_html=True,
-        )
+        st.caption("Modo local de validação")
 
     sources = store.list_sources()
     updated = sum(1 for x in sources if str(x.get("status")).upper() == "ATUALIZADO")
@@ -431,25 +403,25 @@ def render_database() -> None:
             {
                 "label": "Bases previstas",
                 "value": len(sources),
-                "note": "Fontes centrais",
+                "note": "",
                 "accent": "#111827",
             },
             {
                 "label": "Atualizadas",
                 "value": updated,
-                "note": "Com carga registrada",
+                "note": "",
                 "accent": "#22c55e",
             },
             {
                 "label": "Aguardando",
                 "value": len(sources) - updated,
-                "note": "Sem carga atual",
+                "note": "",
                 "accent": "#f59e0b",
             },
             {
                 "label": "Registros",
                 "value": f"{total_rows:,}".replace(",", "."),
-                "note": "Últimas cargas",
+                "note": "",
                 "accent": "#64748b",
             },
         ]
@@ -458,7 +430,7 @@ def render_database() -> None:
     section_band(
         "01 · FONTES",
         "BASES COMPARTILHADAS",
-        "Cada base poderá abastecer vários aplicativos sem duplicar arquivos ou regras de origem.",
+        "",
     )
     normalized = []
     for source in sources:
@@ -478,7 +450,7 @@ def render_database() -> None:
     section_band(
         "02 · ALIMENTAÇÃO",
         "ATUALIZAR BASE DE DADOS",
-        "Nesta primeira versão aceitamos Excel, CSV, XML e arquivos de texto. As regras específicas de tratamento serão adicionadas por base.",
+        "",
     )
     source_options = {
         f"{x['name']} · {x['source_key']}": x["source_key"] for x in sources
@@ -518,7 +490,7 @@ def render_database() -> None:
     section_band(
         "03 · RASTREABILIDADE",
         "HISTÓRICO DE CARGAS",
-        "Registro cronológico das atualizações realizadas na Central de Dados.",
+        "",
     )
     imports = store.list_imports(limit=100)
     if imports:
