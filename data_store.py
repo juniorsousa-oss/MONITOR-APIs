@@ -87,8 +87,8 @@ def system_apis() -> list[dict]:
     return [
         {
             "id": "system-nf-materiais",
-            "name": "API MATERIAIS",
-            "app_name": "Gestão de Entregas → Controle de NFs",
+            "name": "GESTÃO DE ENTREGAS → NFs",
+            "app_name": "Materiais pendentes • Impacto MRP",
             "endpoint": (
                 "https://cuixazpxkvniqldmmnth.supabase.co/"
                 "functions/v1/nf-materiais-api/status"
