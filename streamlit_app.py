@@ -408,6 +408,7 @@ def render_database() -> None:
         unsafe_allow_html=True,
     )
 
+    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
     section_band(
         "02 · PROCESSAMENTO",
         "BASES DERIVADAS",
@@ -420,6 +421,7 @@ def render_database() -> None:
         unsafe_allow_html=True,
     )
 
+    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
     section_band(
         "03 · ALIMENTAÇÃO",
         "ATUALIZAR FONTE",
@@ -541,6 +543,7 @@ def render_database() -> None:
                     + f". Erro: {exc}"
                 )
 
+    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
     section_band(
         "04 · PADRÃO SETTA",
         "IDENTIDADE VISUAL GLOBAL",
