@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import io
+import re
+import zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -45,11 +47,6 @@ inject_css()
 
 def render_sidebar() -> str:
     with st.sidebar:
-        st_autorefresh(
-            interval=30_000,
-            limit=None,
-            key="setta_monitor_refresh",
-        )
         st.markdown(
             '<div class="sidebar-brand">'
             '<div class="sidebar-brand-title">MONITOR DE APIs</div>'
@@ -62,7 +59,17 @@ def render_sidebar() -> str:
             "NAVEGAÇÃO",
             ["MONITOR DE APIs", "BANCO DE DADOS"],
             label_visibility="collapsed",
+            key="central_monitor_page",
         )
+
+        # A tela de Banco de Dados pode processar arquivos grandes.
+        # Não interromper uploads/processamentos com o refresh de 30 segundos.
+        if page == "MONITOR DE APIs":
+            st_autorefresh(
+                interval=30_000,
+                limit=None,
+                key="setta_monitor_refresh",
+            )
 
         st.markdown("---")
         st.markdown(
@@ -100,14 +107,42 @@ def render_header(title: str, subtitle: str, pill: str) -> None:
 
 
 def _count_rows(name: str, raw: bytes) -> int:
+    """Conta linhas sem materializar planilhas Excel grandes no pandas."""
     lower = name.lower()
     try:
         if lower.endswith(".csv"):
-            frame = pd.read_csv(io.BytesIO(raw), sep=None, engine="python")
-            return len(frame)
+            # Não cria DataFrame só para metadado de quantidade.
+            text = raw.decode("utf-8-sig", errors="ignore")
+            lines = [line for line in text.splitlines() if line.strip()]
+            return max(len(lines) - 1, 0)
+
         if lower.endswith((".xlsx", ".xlsm", ".xltx")):
-            frame = pd.read_excel(io.BytesIO(raw))
-            return len(frame)
+            # XLSX/XLSM/XLTX são ZIPs. O atributo dimension da primeira
+            # worksheet informa a última linha e evita ler milhões de células.
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                sheet_names = sorted(
+                    path
+                    for path in archive.namelist()
+                    if re.fullmatch(
+                        r"xl/worksheets/sheet\d+\.xml",
+                        path,
+                    )
+                )
+                if not sheet_names:
+                    return 0
+
+                xml = archive.read(sheet_names[0])[:200_000]
+                match = re.search(
+                    rb'<dimension[^>]+ref="[A-Z]+\d+:?[A-Z]*(\d+)"',
+                    xml,
+                )
+                if match:
+                    last_row = int(match.group(1))
+                    # Quantidade usada apenas como metadado/status.
+                    # Desconta uma linha de cabeçalho sem carregar a planilha.
+                    return max(last_row - 1, 0)
+
+            return 0
     except Exception:
         return 0
     return 0
