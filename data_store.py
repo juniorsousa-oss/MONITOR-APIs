@@ -566,6 +566,49 @@ def list_check_summary(
     )[:limit]
 
 
+def list_check_summaries(
+    api_ids: list[str],
+    since_iso: str,
+    limit: int = 20000,
+) -> dict[str, list[dict]]:
+    ids = [str(value) for value in api_ids if str(value or "").strip()]
+    grouped = {api_id: [] for api_id in ids}
+    if not ids:
+        return grouped
+
+    client = get_client()
+    if client:
+        try:
+            rows = (
+                client.table("api_checks")
+                .select("api_id,checked_at,success,latency_ms")
+                .in_("api_id", ids)
+                .gte("checked_at", since_iso)
+                .order("checked_at", desc=True)
+                .limit(limit)
+                .execute()
+                .data
+                or []
+            )
+            for row in rows:
+                api_id = str(row.get("api_id") or "")
+                if api_id in grouped:
+                    grouped[api_id].append(row)
+            return grouped
+        except Exception:
+            return grouped
+
+    rows = [
+        row for row in _load_local()["checks"]
+        if str(row.get("api_id") or "") in grouped
+        and str(row.get("checked_at") or "") >= str(since_iso)
+    ]
+    rows.sort(key=lambda x: x.get("checked_at", ""), reverse=True)
+    for row in rows[:limit]:
+        grouped[str(row.get("api_id"))].append(row)
+    return grouped
+
+
 def save_check(api_id: str, result: dict) -> dict:
     row = {
         "api_id": api_id,
