@@ -368,16 +368,11 @@ def restart_api(api: dict, attempts: int = 3, pause_seconds: float = 0.8) -> dic
 
 def hydrate_api(api: dict) -> dict:
     api_id = str(api.get("id") or "")
-    last_check = store.parse_dt(api.get("last_check_at"))
-    stale = (
-        last_check is None
-        or (datetime.now(TZ) - last_check).total_seconds() > 180
-    )
-    # Bootstrap seguro para conexões fixas. Depois disso, o worker mantém
-    # o histórico em segundo plano.
-    if api.get("system") and stale:
-        api = run_check(api)
 
+    # IMPORTANTE: a interface é somente leitura.
+    # Verificações de rede contínuas pertencem exclusivamente ao worker.
+    # A tela só executa check quando o usuário clica em VERIFICAR TODAS AGORA
+    # ou Reiniciar API.
     cutoff = datetime.now(TZ) - timedelta(hours=24)
     checks = store.list_check_summary(
         api_id,
