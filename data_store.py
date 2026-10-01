@@ -505,7 +505,8 @@ def save_api(payload: dict) -> dict:
 
 
 def delete_api(api_id: str) -> None:
-    if str(api_id).startswith("system-"):
+    system_ids = {str(item.get("id")) for item in system_apis()}
+    if str(api_id) in system_ids:
         return
     client = get_client()
     if client:
