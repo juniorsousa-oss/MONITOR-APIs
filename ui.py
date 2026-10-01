@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import html
 from pathlib import Path
+from urllib.parse import quote
 
 import streamlit as st
 
@@ -69,9 +70,16 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 .integration-meta-label{font-size:.59rem;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em}
 .integration-meta-value{margin-top:.18rem;font-size:.78rem;font-weight:800;color:#111827;word-break:break-word}
 .integration-error{margin-top:.65rem;padding:.48rem .58rem;border-radius:9px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:.68rem;font-weight:800}
-.api-card{position:relative;background:#fff;border:1px solid #dfe3e8;border-radius:14px;box-shadow:0 4px 16px rgba(15,23,42,.05);padding:1rem 1.1rem;overflow:hidden;min-height:250px}
-.api-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--status)}
-.api-top{display:flex;align-items:flex-start;justify-content:space-between;gap:.7rem}
+.api-card{position:relative;background:#fff;border:1px solid #dfe3e8;border-radius:14px;box-shadow:0 4px 16px rgba(15,23,42,.05);padding:1rem 1.1rem;overflow:visible;min-height:250px}
+.api-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--status);border-radius:14px 0 0 14px}
+.api-top{display:flex;align-items:flex-start;justify-content:space-between;gap:.7rem;padding-right:2rem}
+.api-menu{position:absolute;top:.62rem;right:.62rem;z-index:8}
+.api-menu summary{list-style:none;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;color:#667085;font-size:1.08rem;font-weight:900;line-height:1;user-select:none}
+.api-menu summary::-webkit-details-marker{display:none}
+.api-menu summary:hover,.api-menu[open] summary{background:#f8fafc;color:#111827}
+.api-menu-panel{position:absolute;right:0;top:32px;min-width:158px;padding:.3rem;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.14);z-index:20}
+.api-menu-panel a{display:block;padding:.58rem .66rem;border-radius:7px;color:#374151!important;text-decoration:none!important;font-size:.7rem;font-weight:800;white-space:nowrap;text-transform:uppercase}
+.api-menu-panel a:hover{background:#f8fafc;color:#b91c1c!important}
 .api-name{font-size:.92rem;font-weight:900;color:#111827;line-height:1.25;text-transform:uppercase}
 .api-app{margin-top:.2rem;font-size:.7rem;color:#667085}
 .status-badge{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.28rem .48rem;font-size:.62rem;font-weight:900;background:var(--status-soft);color:var(--status-text);border:1px solid var(--status-border);white-space:nowrap}
@@ -237,9 +245,21 @@ def api_card(api: dict) -> str:
             '</div>'
         )
 
+    api_id = quote(str(api.get("id") or ""), safe="")
+    menu_html = (
+        '<details class="api-menu">'
+        '<summary aria-label="Ações da API" title="Ações">⋮</summary>'
+        '<div class="api-menu-panel">'
+        f'<a href="?restart_api={api_id}" target="_self">Reiniciar API</a>'
+        '</div></details>'
+        if api_id
+        else ""
+    )
+
     return (
         '<div class="api-card" '
         f'style="--status:{accent};--status-soft:{soft};--status-text:{text};--status-border:{border}">'
+        f'{menu_html}'
         '<div class="api-top"><div>'
         f'<div class="api-name">{esc(api.get("name"))}</div>'
         f'<div class="api-app">{esc(api.get("app_name") or "Integração SETTA")}</div>'
