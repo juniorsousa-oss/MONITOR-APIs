@@ -99,6 +99,112 @@ def _nf_materials_status(response: requests.Response, latency: float, api: dict)
     }
 
 
+def _central_action_status(response: requests.Response, latency: float, api: dict) -> dict:
+    expected = int(api.get("expected_status") or 200)
+    valid_http = response.status_code == expected
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    service_ok = payload.get("ok") is True
+    warning_latency = max(1, int(api.get("warning_latency_ms") or 1000))
+    if not valid_http or not service_ok:
+        status = "OFFLINE"
+    elif latency >= warning_latency:
+        status = "ATENÇÃO"
+    else:
+        status = "ONLINE"
+    error = ""
+    if not valid_http:
+        error = f"HTTP {response.status_code}; esperado {expected}."
+    elif not service_ok:
+        error = str(payload.get("error") or "A Central não confirmou a operação.")
+    return {
+        "status": status,
+        "success": bool(valid_http and service_ok),
+        "http_status": int(response.status_code),
+        "latency_ms": latency,
+        "error_message": error,
+    }
+
+
+def _central_derived_download_status(
+    response: requests.Response,
+    start: float,
+    api: dict,
+) -> dict:
+    base_result = _central_action_status(
+        response,
+        round((time.perf_counter() - start) * 1000, 2),
+        api,
+    )
+    if not base_result["success"]:
+        return base_result
+
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    data = data if isinstance(data, dict) else {}
+    signed_url = str(data.get("signed_url") or "").strip()
+    if not signed_url:
+        return {
+            **base_result,
+            "status": "OFFLINE",
+            "success": False,
+            "error_message": "A Central respondeu, mas não retornou URL de leitura do Storage.",
+        }
+
+    storage_http = None
+    try:
+        storage_response = requests.get(
+            signed_url,
+            headers={"Range": "bytes=0-0"},
+            timeout=min(15, max(3, int(api.get("timeout_seconds") or 15))),
+            allow_redirects=True,
+            stream=True,
+        )
+        storage_http = int(storage_response.status_code)
+        storage_ok = storage_http in {200, 206}
+        storage_response.close()
+    except requests.RequestException as exc:
+        latency = round((time.perf_counter() - start) * 1000, 2)
+        return {
+            **base_result,
+            "status": "OFFLINE",
+            "success": False,
+            "latency_ms": latency,
+            "error_message": f"Storage: {type(exc).__name__}: {exc}",
+            "integration_meta": {"storage_http_status": storage_http},
+        }
+
+    latency = round((time.perf_counter() - start) * 1000, 2)
+    warning_latency = max(1, int(api.get("warning_latency_ms") or 2500))
+    status = (
+        "OFFLINE"
+        if not storage_ok
+        else "ATENÇÃO"
+        if latency >= warning_latency
+        else "ONLINE"
+    )
+    return {
+        **base_result,
+        "status": status,
+        "success": bool(storage_ok),
+        "latency_ms": latency,
+        "error_message": "" if storage_ok else f"Storage HTTP {storage_http}.",
+        "integration_meta": {
+            "storage_http_status": storage_http,
+            "base_key": (
+                (api.get("request_json") or {}).get("payload") or {}
+            ).get("base_key"),
+        },
+    }
+
+
 def check_api(api: dict) -> dict:
     checked_at = store.now_iso()
     endpoint = str(api.get("endpoint") or "").strip()
@@ -120,17 +226,27 @@ def check_api(api: dict) -> dict:
 
     start = time.perf_counter()
     try:
-        response = requests.request(
-            method=method,
-            url=endpoint,
-            headers=headers,
-            timeout=timeout,
-            allow_redirects=True,
-        )
+        request_kwargs = {
+            "method": method,
+            "url": endpoint,
+            "headers": headers,
+            "timeout": timeout,
+            "allow_redirects": True,
+        }
+        if api.get("request_json") is not None:
+            request_kwargs["json"] = api.get("request_json")
+        response = requests.request(**request_kwargs)
         latency = round((time.perf_counter() - start) * 1000, 2)
 
-        if str(api.get("health_mode") or "") == "NF_MATERIAIS_STATUS":
+        health_mode = str(api.get("health_mode") or "")
+        if health_mode == "NF_MATERIAIS_STATUS":
             result = _nf_materials_status(response, latency, api)
+            return {"checked_at": checked_at, **result}
+        if health_mode == "CENTRAL_ACTION":
+            result = _central_action_status(response, latency, api)
+            return {"checked_at": checked_at, **result}
+        if health_mode == "CENTRAL_DERIVED_DOWNLOAD":
+            result = _central_derived_download_status(response, start, api)
             return {"checked_at": checked_at, **result}
 
         valid_status = response.status_code == expected
@@ -170,31 +286,11 @@ def run_check(api: dict) -> dict:
 
     result = check_api(api)
 
-    # Integrações de sistema são consultadas diretamente na origem.
-    # Não dependem das tabelas internas do Monitor para aparecerem na tela.
-    if api_id.startswith("system-"):
-        return {
-            **api,
-            **result,
-            "last_check_at": result.get("checked_at"),
-            "last_success_at": (
-                result.get("checked_at") if result.get("success") else None
-            ),
-            "last_check_label": store.format_dt(result.get("checked_at")),
-            "last_success_label": (
-                store.format_dt(result.get("checked_at"))
-                if result.get("success")
-                else "—"
-            ),
-            "consecutive_failures": 0 if result.get("success") else 1,
-            "latency_history": (
-                [result.get("latency_ms")]
-                if result.get("latency_ms") is not None
-                else []
-            ),
-        }
-
-    store.save_check(api_id, result)
+    persistence_error = ""
+    try:
+        store.save_check(api_id, result)
+    except Exception as exc:
+        persistence_error = f"{type(exc).__name__}: {exc}"
 
     previous_failures = int(api.get("consecutive_failures") or 0)
     success = bool(result["success"])
@@ -225,8 +321,17 @@ def run_check(api: dict) -> dict:
             result.get("error_message") or "Falha de comunicação.",
         )
 
-    store.update_api_runtime(api_id, runtime)
-    return {**api, **runtime, **result}
+    try:
+        store.update_api_runtime(api_id, runtime)
+    except Exception as exc:
+        if not persistence_error:
+            persistence_error = f"{type(exc).__name__}: {exc}"
+    merged = {**api, **runtime, **result}
+    if persistence_error:
+        meta = dict(merged.get("integration_meta") or {})
+        meta["monitor_persistence_error"] = persistence_error
+        merged["integration_meta"] = meta
+    return merged
 
 
 def run_all_checks() -> list[dict]:
@@ -263,27 +368,33 @@ def restart_api(api: dict, attempts: int = 3, pause_seconds: float = 0.8) -> dic
 
 def hydrate_api(api: dict) -> dict:
     api_id = str(api.get("id") or "")
-    if api_id.startswith("system-"):
-        return run_check(api)
+    last_check = store.parse_dt(api.get("last_check_at"))
+    stale = (
+        last_check is None
+        or (datetime.now(TZ) - last_check).total_seconds() > 180
+    )
+    # Bootstrap seguro para conexões fixas. Depois disso, o worker mantém
+    # o histórico em segundo plano.
+    if api.get("system") and stale:
+        api = run_check(api)
 
-    checks = store.list_checks(api_id, limit=160)
-    recent_24h = []
     cutoff = datetime.now(TZ) - timedelta(hours=24)
-    for check in checks:
-        dt = store.parse_dt(check.get("checked_at"))
-        if dt and dt >= cutoff:
-            recent_24h.append(check)
+    checks = store.list_check_summary(
+        api_id,
+        cutoff.isoformat(),
+        limit=2000,
+    )
 
-    if recent_24h:
-        successes = sum(1 for x in recent_24h if bool(x.get("success")))
-        uptime = (successes / len(recent_24h)) * 100
+    if checks:
+        successes = sum(1 for item in checks if bool(item.get("success")))
+        uptime = (successes / len(checks)) * 100
     else:
         uptime = None
 
     history = [
-        float(x.get("latency_ms"))
-        for x in reversed(checks[:12])
-        if x.get("latency_ms") is not None
+        float(item.get("latency_ms"))
+        for item in reversed(checks[:12])
+        if item.get("latency_ms") is not None
     ]
     return {
         **api,
@@ -292,13 +403,15 @@ def hydrate_api(api: dict) -> dict:
             if not bool(api.get("active", True))
             else str(api.get("status") or "SEM DADOS")
         ),
-        "latency_ms": api.get("last_latency_ms"),
-        "http_status": api.get("last_http_status"),
+        "latency_ms": api.get("last_latency_ms", api.get("latency_ms")),
+        "http_status": api.get("last_http_status", api.get("http_status")),
         "uptime_24h": uptime,
+        "uptime_samples": len(checks),
         "latency_history": history,
         "last_check_label": store.format_dt(api.get("last_check_at")),
         "last_success_label": store.format_dt(api.get("last_success_at")),
     }
+
 
 
 def hydrate_all(apis: list[dict]) -> list[dict]:
