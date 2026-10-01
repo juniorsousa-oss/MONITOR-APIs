@@ -308,6 +308,23 @@ def render_monitor() -> None:
             h1.metric("Método", selected.get("method") or "GET")
             h2.metric("HTTP esperado", selected.get("expected_status") or 200)
             h3.metric("Timeout", f"{selected.get('timeout_seconds') or 10}s")
+            if selected.get("source_app") or selected.get("target_app"):
+                st.caption(
+                    "CONEXÃO · "
+                    + str(selected.get("source_app") or "—")
+                    + " → "
+                    + str(selected.get("target_app") or "—")
+                )
+                st.caption(
+                    "SERVIÇO · "
+                    + str(selected.get("service") or "—")
+                    + "  |  RECURSO · "
+                    + str(selected.get("resource") or "—")
+                )
+                st.caption(
+                    "LOCAL DA CONEXÃO · "
+                    + str(selected.get("code_location") or "—")
+                )
             st.code(str(selected.get("endpoint") or ""), language=None)
 
             if selected.get("system"):
@@ -354,7 +371,41 @@ def render_monitor() -> None:
 
     st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
     section_band(
-        "03 · OCORRÊNCIAS",
+        "03 · COBERTURA",
+        "MAPA DE CONEXÕES",
+        "Origem, destino e local técnico de cada integração conhecida.",
+    )
+    coverage = pd.DataFrame(store.connection_coverage())
+    if not coverage.empty:
+        coverage = coverage.rename(
+            columns={
+                "connection": "CONEXÃO",
+                "source": "ORIGEM",
+                "target": "DESTINO",
+                "service": "SERVIÇO",
+                "resource": "RECURSO",
+                "code": "LOCAL DA CONEXÃO",
+                "monitoring": "MONITORAMENTO",
+            }
+        )
+        st.dataframe(
+            coverage,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "CONEXÃO": st.column_config.TextColumn(width="medium"),
+                "ORIGEM": st.column_config.TextColumn(width="medium"),
+                "DESTINO": st.column_config.TextColumn(width="medium"),
+                "SERVIÇO": st.column_config.TextColumn(width="medium"),
+                "RECURSO": st.column_config.TextColumn(width="large"),
+                "LOCAL DA CONEXÃO": st.column_config.TextColumn(width="large"),
+                "MONITORAMENTO": st.column_config.TextColumn(width="medium"),
+            },
+        )
+
+    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
+    section_band(
+        "04 · OCORRÊNCIAS",
         "INCIDENTES RECENTES",
         "",
     )
