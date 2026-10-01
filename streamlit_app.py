@@ -151,8 +151,8 @@ def _count_rows(name: str, raw: bytes) -> int:
 
 
 def _monitor_pill(apis: list[dict]) -> str:
-    if not store.supabase_enabled():
-        return "MODO LOCAL · SEM WORKER COMPARTILHADO"
+    if not store.monitor_shared_enabled():
+        return "BACKEND COMPARTILHADO INDISPONÍVEL"
     real = [x for x in apis if not x.get("demo")]
     if not real:
         return "SEM APIs"
@@ -259,12 +259,11 @@ def render_monitor() -> None:
         _monitor_pill(apis),
     )
 
-    if not store.supabase_enabled():
+    if not store.monitor_shared_enabled():
         st.error(
-            "MONITOR EM MODO LOCAL: a interface não está usando um banco compartilhado. "
-            "Nesse modo o worker externo não consegue alimentar uptime, histórico e status "
-            "dos serviços. Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no ambiente "
-            "da interface e do worker com os mesmos valores."
+            "BACKEND COMPARTILHADO INDISPONÍVEL: a Central de Dados SETTA não está "
+            "acessível para persistir os checks do Monitor. Verifique a Edge Function "
+            "setta-data-api antes de executar novos ciclos."
         )
 
     restart_notice = st.session_state.pop("_api_restart_notice", None)
