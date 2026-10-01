@@ -248,11 +248,14 @@ def api_card(api: dict) -> str:
             f'<div class="api-source-value">{esc(api.get("resource") or "—")}</div></div>'
             '<div class="api-source-item"><div class="api-source-label">Local da conexão</div>'
             f'<div class="api-source-value">{esc(api.get("code_location") or "—")}</div></div>'
+            '<div class="api-source-item"><div class="api-source-label">Critério de atenção</div>'
+            f'<div class="api-source-value">LATÊNCIA ≥ {esc(api.get("warning_latency_ms") or 1000)} ms</div></div>'
             '</div>'
         )
 
     source_html = ""
-    if meta:
+    _nf_meta_keys = ("carga_id", "total_itens", "total_produtos", "ultima_verificacao_em")
+    if meta and any(meta.get(key) not in (None, "") for key in _nf_meta_keys):
         carga = meta.get("carga_id")
         itens = meta.get("total_itens")
         produtos = meta.get("total_produtos")
