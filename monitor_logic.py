@@ -366,20 +366,7 @@ def restart_api(api: dict, attempts: int = 3, pause_seconds: float = 0.8) -> dic
     return current
 
 
-def hydrate_api(api: dict) -> dict:
-    api_id = str(api.get("id") or "")
-
-    # IMPORTANTE: a interface é somente leitura.
-    # Verificações de rede contínuas pertencem exclusivamente ao worker.
-    # A tela só executa check quando o usuário clica em VERIFICAR TODAS AGORA
-    # ou Reiniciar API.
-    cutoff = datetime.now(TZ) - timedelta(hours=24)
-    checks = store.list_check_summary(
-        api_id,
-        cutoff.isoformat(),
-        limit=2000,
-    )
-
+def _hydrate_from_checks(api: dict, checks: list[dict]) -> dict:
     if checks:
         successes = sum(1 for item in checks if bool(item.get("success")))
         uptime = (successes / len(checks)) * 100
@@ -408,6 +395,28 @@ def hydrate_api(api: dict) -> dict:
     }
 
 
+def hydrate_api(api: dict) -> dict:
+    api_id = str(api.get("id") or "")
+    cutoff = datetime.now(TZ) - timedelta(hours=24)
+    checks = store.list_check_summary(
+        api_id,
+        cutoff.isoformat(),
+        limit=2000,
+    )
+    return _hydrate_from_checks(api, checks)
+
+
 
 def hydrate_all(apis: list[dict]) -> list[dict]:
-    return [hydrate_api(dict(api)) for api in apis]
+    normalized = [dict(api) for api in apis]
+    cutoff = datetime.now(TZ) - timedelta(hours=24)
+    ids = [str(api.get("id") or "") for api in normalized]
+    grouped = store.list_check_summaries(
+        ids,
+        cutoff.isoformat(),
+        limit=max(2000, len(ids) * 1600),
+    )
+    return [
+        _hydrate_from_checks(api, grouped.get(str(api.get("id") or ""), []))
+        for api in normalized
+    ]
