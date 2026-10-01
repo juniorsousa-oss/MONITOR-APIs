@@ -78,6 +78,12 @@ def supabase_enabled() -> bool:
     return bool(SUPABASE_URL and SUPABASE_KEY)
 
 
+def monitor_shared_enabled() -> bool:
+    # O backend compartilhado do Monitor vive na Central de Dados SETTA.
+    # A Edge Function mantém o service_role somente no servidor.
+    return bool(CENTRAL_SUPABASE_URL and CENTRAL_SUPABASE_ANON_KEY)
+
+
 def get_client():
     global _client
     if not supabase_enabled():
@@ -281,35 +287,18 @@ def _system_db_payload(api: dict) -> dict:
 
 
 def ensure_system_apis() -> None:
-    systems = system_apis()
-    client = get_client()
-    if client:
-        try:
-            client.table("monitor_apis").upsert(
-                [_system_db_payload(item) for item in systems],
-                on_conflict="id",
-            ).execute()
-        except Exception:
-            # O painel continua funcional; o card indicará ausência de histórico
-            # até a persistência voltar a responder.
-            pass
+    global _system_sync_done
+    if globals().get("_system_sync_done"):
         return
+    rows = [_system_db_payload(item) for item in system_apis()]
+    try:
+        central_api_call("monitor_apis_upsert", {"rows": rows}, timeout=30)
+        _system_sync_done = True
+    except Exception:
+        # Não usar armazenamento local silenciosamente: a UI deve refletir
+        # a indisponibilidade do backend compartilhado.
+        _system_sync_done = False
 
-    data = _load_local()
-    by_id = {str(item.get("id")): item for item in data["apis"]}
-    changed = False
-    for api in systems:
-        api_id = str(api["id"])
-        current = by_id.get(api_id)
-        if current is None:
-            data["apis"].append(_system_db_payload(api))
-            changed = True
-        else:
-            before = dict(current)
-            current.update(_system_db_payload(api))
-            changed = changed or current != before
-    if changed:
-        _save_local(data)
 
 
 def connection_coverage() -> list[dict]:
@@ -427,24 +416,18 @@ def list_integrations() -> list[dict]:
 
 def list_apis(include_demo: bool = True) -> list[dict]:
     ensure_system_apis()
-    client = get_client()
-    rows: list[dict] = []
-    if client:
-        try:
-            rows = client.table("monitor_apis").select("*").order("name").execute().data or []
-        except Exception:
-            rows = []
-    else:
-        rows = _load_local()["apis"]
+    try:
+        rows = central_api_call("monitor_apis_list", timeout=30).get("data") or []
+    except Exception:
+        rows = []
 
     configs = system_apis()
-    by_id = {str(row.get("id")): row for row in rows}
+    by_id = {str(row.get("id")): row for row in rows if isinstance(row, dict)}
     system_ids = {str(item.get("id")) for item in configs}
     systems = [
         {**config, **by_id.get(str(config["id"]), {})}
         for config in configs
     ]
-    # Metadados técnicos não pertencem à tabela; reaplica depois do overlay.
     systems = [
         {
             **item,
@@ -458,13 +441,17 @@ def list_apis(include_demo: bool = True) -> list[dict]:
         }
         for item, config in zip(systems, configs)
     ]
-    custom = [row for row in rows if str(row.get("id")) not in system_ids]
+    custom = [
+        row for row in rows
+        if isinstance(row, dict) and str(row.get("id")) not in system_ids
+    ]
     return systems + custom
 
 
 
 def save_api(payload: dict) -> dict:
     clean = {
+        "id": str(payload.get("id") or "").strip() or None,
         "name": str(payload.get("name") or "").strip(),
         "app_name": str(payload.get("app_name") or "").strip(),
         "endpoint": str(payload.get("endpoint") or "").strip(),
@@ -474,63 +461,41 @@ def save_api(payload: dict) -> dict:
         "warning_latency_ms": int(payload.get("warning_latency_ms") or 1000),
         "active": bool(payload.get("active", True)),
         "secret_ref": str(payload.get("secret_ref") or "").strip(),
-        "updated_at": now_iso(),
     }
     if not clean["name"] or not clean["endpoint"]:
         raise ValueError("Nome e endpoint são obrigatórios.")
+    if clean["id"] is None:
+        clean.pop("id")
+    row = central_api_call(
+        "monitor_api_save",
+        clean,
+        timeout=30,
+    ).get("data") or clean
+    return row
 
-    client = get_client()
-    if client:
-        api_id = payload.get("id")
-        if api_id:
-            rows = client.table("monitor_apis").update(clean).eq("id", api_id).execute().data or []
-        else:
-            clean["created_at"] = now_iso()
-            rows = client.table("monitor_apis").insert(clean).execute().data or []
-        return rows[0] if rows else clean
-
-    data = _load_local()
-    api_id = str(payload.get("id") or uuid.uuid4())
-    clean["id"] = api_id
-    existing = next((x for x in data["apis"] if x.get("id") == api_id), None)
-    if existing:
-        existing.update(clean)
-        result = existing
-    else:
-        clean["created_at"] = now_iso()
-        data["apis"].append(clean)
-        result = clean
-    _save_local(data)
-    return result
 
 
 def delete_api(api_id: str) -> None:
     system_ids = {str(item.get("id")) for item in system_apis()}
     if str(api_id) in system_ids:
         return
-    client = get_client()
-    if client:
-        client.table("monitor_apis").delete().eq("id", api_id).execute()
-        return
-    data = _load_local()
-    data["apis"] = [x for x in data["apis"] if x.get("id") != api_id]
-    data["checks"] = [x for x in data["checks"] if x.get("api_id") != api_id]
-    data["incidents"] = [x for x in data["incidents"] if x.get("api_id") != api_id]
-    _save_local(data)
+    central_api_call(
+        "monitor_api_delete",
+        {"id": str(api_id)},
+        timeout=30,
+    )
+
 
 
 def list_checks(api_id: str | None = None, limit: int = 200) -> list[dict]:
-    client = get_client()
-    if client:
-        query = client.table("api_checks").select("*")
-        if api_id:
-            query = query.eq("api_id", api_id)
-        return query.order("checked_at", desc=True).limit(limit).execute().data or []
-
-    rows = _load_local()["checks"]
-    if api_id:
-        rows = [x for x in rows if x.get("api_id") == api_id]
-    return sorted(rows, key=lambda x: x.get("checked_at", ""), reverse=True)[:limit]
+    try:
+        return central_api_call(
+            "monitor_checks_list",
+            {"api_id": api_id or "", "limit": int(limit)},
+            timeout=30,
+        ).get("data") or []
+    except Exception:
+        return []
 
 
 def list_check_summary(
@@ -538,32 +503,8 @@ def list_check_summary(
     since_iso: str,
     limit: int = 2000,
 ) -> list[dict]:
-    client = get_client()
-    if client:
-        try:
-            return (
-                client.table("api_checks")
-                .select("checked_at,success,latency_ms")
-                .eq("api_id", api_id)
-                .gte("checked_at", since_iso)
-                .order("checked_at", desc=True)
-                .limit(limit)
-                .execute()
-                .data
-                or []
-            )
-        except Exception:
-            return []
-    rows = [
-        row for row in _load_local()["checks"]
-        if str(row.get("api_id")) == str(api_id)
-        and str(row.get("checked_at") or "") >= str(since_iso)
-    ]
-    return sorted(
-        rows,
-        key=lambda x: x.get("checked_at", ""),
-        reverse=True,
-    )[:limit]
+    grouped = list_check_summaries([api_id], since_iso, limit)
+    return grouped.get(str(api_id), [])
 
 
 def list_check_summaries(
@@ -575,43 +516,31 @@ def list_check_summaries(
     grouped = {api_id: [] for api_id in ids}
     if not ids:
         return grouped
-
-    client = get_client()
-    if client:
-        try:
-            rows = (
-                client.table("api_checks")
-                .select("api_id,checked_at,success,latency_ms")
-                .in_("api_id", ids)
-                .gte("checked_at", since_iso)
-                .order("checked_at", desc=True)
-                .limit(limit)
-                .execute()
-                .data
-                or []
-            )
-            for row in rows:
-                api_id = str(row.get("api_id") or "")
-                if api_id in grouped:
-                    grouped[api_id].append(row)
-            return grouped
-        except Exception:
-            return grouped
-
-    rows = [
-        row for row in _load_local()["checks"]
-        if str(row.get("api_id") or "") in grouped
-        and str(row.get("checked_at") or "") >= str(since_iso)
-    ]
-    rows.sort(key=lambda x: x.get("checked_at", ""), reverse=True)
-    for row in rows[:limit]:
-        grouped[str(row.get("api_id"))].append(row)
+    try:
+        rows = central_api_call(
+            "monitor_checks_summary",
+            {
+                "api_ids": ids,
+                "since_iso": str(since_iso or ""),
+                "limit": int(limit),
+            },
+            timeout=30,
+        ).get("data") or []
+    except Exception:
+        return grouped
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        api_id = str(row.get("api_id") or "")
+        if api_id in grouped:
+            grouped[api_id].append(row)
     return grouped
+
 
 
 def save_check(api_id: str, result: dict) -> dict:
     row = {
-        "api_id": api_id,
+        "api_id": str(api_id),
         "checked_at": result.get("checked_at") or now_iso(),
         "status": result.get("status"),
         "http_status": result.get("http_status"),
@@ -619,17 +548,15 @@ def save_check(api_id: str, result: dict) -> dict:
         "success": bool(result.get("success")),
         "error_message": str(result.get("error_message") or "")[:1000],
     }
-    client = get_client()
-    if client:
-        saved = client.table("api_checks").insert(row).execute().data or []
-        return saved[0] if saved else row
+    return (
+        central_api_call(
+            "monitor_check_save",
+            {"row": row},
+            timeout=30,
+        ).get("data")
+        or row
+    )
 
-    data = _load_local()
-    row["id"] = str(uuid.uuid4())
-    data["checks"].append(row)
-    data["checks"] = data["checks"][-10000:]
-    _save_local(data)
-    return row
 
 
 def update_api_runtime(api_id: str, fields: dict) -> None:
@@ -637,67 +564,48 @@ def update_api_runtime(api_id: str, fields: dict) -> None:
         return
     allowed = {
         "status", "last_check_at", "last_success_at", "last_failure_at",
-        "last_http_status", "last_latency_ms", "consecutive_failures", "updated_at"
+        "last_http_status", "last_latency_ms", "consecutive_failures",
     }
-    clean = {k: v for k, v in fields.items() if k in allowed}
-    clean["updated_at"] = now_iso()
-    client = get_client()
-    if client:
-        client.table("monitor_apis").update(clean).eq("id", api_id).execute()
-        return
-    data = _load_local()
-    for api in data["apis"]:
-        if api.get("id") == api_id:
-            api.update(clean)
-            break
-    _save_local(data)
+    clean = {key: value for key, value in fields.items() if key in allowed}
+    central_api_call(
+        "monitor_runtime_update",
+        {"id": str(api_id), "fields": clean},
+        timeout=30,
+    )
+
 
 
 def list_incidents(limit: int = 100) -> list[dict]:
-    client = get_client()
-    if client:
-        return client.table("api_incidents").select("*").order("started_at", desc=True).limit(limit).execute().data or []
-    return sorted(_load_local()["incidents"], key=lambda x: x.get("started_at", ""), reverse=True)[:limit]
+    try:
+        return central_api_call(
+            "monitor_incidents_list",
+            {"limit": int(limit)},
+            timeout=30,
+        ).get("data") or []
+    except Exception:
+        return []
 
 
 def open_incident(api_id: str, api_name: str, kind: str, message: str) -> None:
-    client = get_client()
-    if client:
-        open_rows = (
-            client.table("api_incidents").select("id")
-            .eq("api_id", api_id).eq("status", "ABERTO").limit(1).execute().data or []
-        )
-        if open_rows:
-            return
-        client.table("api_incidents").insert({
-            "api_id": api_id, "api_name": api_name, "kind": kind,
-            "message": message[:1000], "status": "ABERTO", "started_at": now_iso()
-        }).execute()
-        return
-
-    data = _load_local()
-    if any(x.get("api_id") == api_id and x.get("status") == "ABERTO" for x in data["incidents"]):
-        return
-    data["incidents"].append({
-        "id": str(uuid.uuid4()), "api_id": api_id, "api_name": api_name,
-        "kind": kind, "message": message[:1000], "status": "ABERTO", "started_at": now_iso()
-    })
-    _save_local(data)
+    central_api_call(
+        "monitor_incident_open",
+        {
+            "api_id": str(api_id),
+            "api_name": str(api_name),
+            "kind": str(kind),
+            "message": str(message)[:1000],
+        },
+        timeout=30,
+    )
 
 
 def resolve_incidents(api_id: str) -> None:
-    client = get_client()
-    if client:
-        client.table("api_incidents").update({
-            "status": "NORMALIZADO", "resolved_at": now_iso()
-        }).eq("api_id", api_id).eq("status", "ABERTO").execute()
-        return
-    data = _load_local()
-    for incident in data["incidents"]:
-        if incident.get("api_id") == api_id and incident.get("status") == "ABERTO":
-            incident["status"] = "NORMALIZADO"
-            incident["resolved_at"] = now_iso()
-    _save_local(data)
+    central_api_call(
+        "monitor_incidents_resolve",
+        {"api_id": str(api_id)},
+        timeout=30,
+    )
+
 
 
 SOURCE_CATALOG = [
