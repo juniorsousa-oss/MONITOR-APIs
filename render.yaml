@@ -13,15 +13,4 @@ services:
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
 
-  - type: worker
-    name: setta-monitor-worker
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python monitor_worker.py --loop --interval 60
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.7
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
+# Monitoramento 24/7 executado pelo Supabase Cron -> setta-monitor-worker.
