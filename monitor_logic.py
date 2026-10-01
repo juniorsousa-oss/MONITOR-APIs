@@ -238,6 +238,29 @@ def run_all_checks() -> list[dict]:
     return results
 
 
+def restart_api(api: dict, attempts: int = 3, pause_seconds: float = 0.8) -> dict:
+    """
+    Executa um ciclo de recuperação da API com conexões novas.
+
+    O objetivo é recuperar falhas transitórias de rede/timeout sem esconder
+    erros estruturais: se a origem continuar respondendo com erro, o estado
+    permanece OFFLINE e a causa continua visível no monitor.
+    """
+    current = dict(api)
+    attempts = max(1, min(int(attempts or 1), 3))
+    pause_seconds = max(0.0, min(float(pause_seconds or 0.0), 2.0))
+
+    for attempt in range(1, attempts + 1):
+        current = run_check(current)
+        current["restart_attempts"] = attempt
+        if bool(current.get("success")):
+            break
+        if attempt < attempts and pause_seconds:
+            time.sleep(pause_seconds)
+
+    return current
+
+
 def hydrate_api(api: dict) -> dict:
     api_id = str(api.get("id") or "")
     if api_id.startswith("system-"):
