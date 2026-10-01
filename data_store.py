@@ -118,15 +118,13 @@ def _save_local(data: dict) -> None:
 
 
 def system_apis() -> list[dict]:
+    central_endpoint = CENTRAL_EDGE_URL
     return [
         {
-            "id": "system-central-dados",
+            "id": "11111111-1111-4111-8111-111111111101",
             "name": "CENTRAL DE DADOS SETTA",
-            "app_name": "Fontes • Bases tratadas • Integrações",
-            "endpoint": (
-                "https://cuixazpxkvniqldmmnth.supabase.co/"
-                "functions/v1/setta-data-api/health"
-            ),
+            "app_name": "Saúde da Edge Function principal",
+            "endpoint": central_endpoint + "/health",
             "method": "GET",
             "expected_status": 200,
             "timeout_seconds": 15,
@@ -134,9 +132,95 @@ def system_apis() -> list[dict]:
             "active": True,
             "secret_ref": "__GESTAO_ENTREGAS_ANON__",
             "system": True,
+            "source_app": "MONITOR DE APIs",
+            "target_app": "CENTRAL DE DADOS SETTA",
+            "service": "Supabase Edge Function",
+            "resource": "setta-data-api /health",
+            "code_location": "MONITOR-APIs/data_store.py",
         },
         {
-            "id": "system-entregas-operacional",
+            "id": "11111111-1111-4111-8111-111111111102",
+            "name": "MRP → CENTRAL DE DADOS",
+            "app_name": "Leitura das bases que alimentam o MRP",
+            "endpoint": central_endpoint,
+            "method": "POST",
+            "expected_status": 200,
+            "timeout_seconds": 20,
+            "warning_latency_ms": 1800,
+            "active": True,
+            "secret_ref": "__GESTAO_ENTREGAS_ANON__",
+            "health_mode": "CENTRAL_ACTION",
+            "request_json": {
+                "action": "bundle_state",
+                "payload": {
+                    "source_keys": ["cadastros"],
+                    "derived_keys": [
+                        "relatorio_geral_tratado",
+                        "estoque_tratado",
+                        "compras_tratado",
+                        "tctp_tratado",
+                        "relatorio_mrp",
+                    ],
+                },
+            },
+            "system": True,
+            "source_app": "MRP",
+            "target_app": "CENTRAL DE DADOS SETTA",
+            "service": "Supabase Edge Function",
+            "resource": "setta-data-api · bundle_state",
+            "code_location": "MRP/central_mrp_data.py",
+        },
+        {
+            "id": "11111111-1111-4111-8111-111111111103",
+            "name": "CONVERSOR MRP → CENTRAL",
+            "app_name": "Estado dos relatórios de origem e bases tratadas",
+            "endpoint": central_endpoint,
+            "method": "POST",
+            "expected_status": 200,
+            "timeout_seconds": 20,
+            "warning_latency_ms": 1800,
+            "active": True,
+            "secret_ref": "__GESTAO_ENTREGAS_ANON__",
+            "health_mode": "CENTRAL_ACTION",
+            "request_json": {
+                "action": "pipeline_state",
+                "payload": {
+                    "source_keys": ["relatorio_geral", "for001", "for022"],
+                    "derived_key": "relatorio_geral_tratado",
+                },
+            },
+            "system": True,
+            "source_app": "CONVERSOR MRP",
+            "target_app": "CENTRAL DE DADOS SETTA",
+            "service": "Supabase Edge Function",
+            "resource": "setta-data-api · pipeline_state",
+            "code_location": "MRP-CONVERSOR/central_data.py · pipeline_sync.py",
+        },
+        {
+            "id": "11111111-1111-4111-8111-111111111104",
+            "name": "CENTRAL → STORAGE MRP",
+            "app_name": "Disponibilização das bases tratadas",
+            "endpoint": central_endpoint,
+            "method": "POST",
+            "expected_status": 200,
+            "timeout_seconds": 25,
+            "warning_latency_ms": 2500,
+            "active": True,
+            "secret_ref": "__GESTAO_ENTREGAS_ANON__",
+            "health_mode": "CENTRAL_DERIVED_DOWNLOAD",
+            "request_json": {
+                "action": "derived_download",
+                "payload": {"base_key": "relatorio_geral_tratado"},
+            },
+            "system": True,
+            "source_app": "CENTRAL DE DADOS SETTA",
+            "target_app": "SUPABASE STORAGE",
+            "service": "Supabase Storage",
+            "resource": "bucket setta-data · relatorio_geral_tratado",
+            "code_location": "MRP/central_mrp_data.py · MRP-CONVERSOR/central_data.py",
+        },
+        {
+            "id": "11111111-1111-4111-8111-111111111105",
             "name": "GESTÃO DE ENTREGAS — OPERACIONAL",
             "app_name": "Cronograma • Central • Sincronização",
             "endpoint": (
@@ -150,9 +234,14 @@ def system_apis() -> list[dict]:
             "active": True,
             "secret_ref": "__GESTAO_ENTREGAS_ANON__",
             "system": True,
+            "source_app": "GESTÃO DE ENTREGAS",
+            "target_app": "CENTRAL DE DADOS SETTA",
+            "service": "Supabase Edge Function",
+            "resource": "entrega-cronograma-api /health",
+            "code_location": "Gestão de Entregas · integração operacional",
         },
         {
-            "id": "system-nf-materiais",
+            "id": "11111111-1111-4111-8111-111111111106",
             "name": "GESTÃO DE ENTREGAS → NFs",
             "app_name": "Materiais pendentes • Impacto MRP",
             "endpoint": (
@@ -167,8 +256,135 @@ def system_apis() -> list[dict]:
             "secret_ref": "__GESTAO_ENTREGAS_ANON__",
             "health_mode": "NF_MATERIAIS_STATUS",
             "system": True,
+            "source_app": "GESTÃO DE ENTREGAS",
+            "target_app": "CONTROLE DE NFs",
+            "service": "Supabase Edge Function",
+            "resource": "nf-materiais-api /status",
+            "code_location": "Gestão de Entregas · Controle de NFs",
         },
     ]
+
+
+def _system_db_payload(api: dict) -> dict:
+    return {
+        "id": str(api["id"]),
+        "name": str(api.get("name") or ""),
+        "app_name": str(api.get("app_name") or ""),
+        "endpoint": str(api.get("endpoint") or ""),
+        "method": str(api.get("method") or "GET"),
+        "expected_status": int(api.get("expected_status") or 200),
+        "timeout_seconds": int(api.get("timeout_seconds") or 10),
+        "warning_latency_ms": int(api.get("warning_latency_ms") or 1000),
+        "active": bool(api.get("active", True)),
+        "secret_ref": str(api.get("secret_ref") or ""),
+    }
+
+
+def ensure_system_apis() -> None:
+    systems = system_apis()
+    client = get_client()
+    if client:
+        try:
+            client.table("monitor_apis").upsert(
+                [_system_db_payload(item) for item in systems],
+                on_conflict="id",
+            ).execute()
+        except Exception:
+            # O painel continua funcional; o card indicará ausência de histórico
+            # até a persistência voltar a responder.
+            pass
+        return
+
+    data = _load_local()
+    by_id = {str(item.get("id")): item for item in data["apis"]}
+    changed = False
+    for api in systems:
+        api_id = str(api["id"])
+        current = by_id.get(api_id)
+        if current is None:
+            data["apis"].append(_system_db_payload(api))
+            changed = True
+        else:
+            before = dict(current)
+            current.update(_system_db_payload(api))
+            changed = changed or current != before
+    if changed:
+        _save_local(data)
+
+
+def connection_coverage() -> list[dict]:
+    monitored = [
+        {
+            "connection": item["name"],
+            "source": item.get("source_app") or "—",
+            "target": item.get("target_app") or "—",
+            "service": item.get("service") or "—",
+            "resource": item.get("resource") or "—",
+            "code": item.get("code_location") or "—",
+            "monitoring": "MONITORADO",
+        }
+        for item in system_apis()
+    ]
+    pending = [
+        {
+            "connection": "MRP → HISTÓRICO",
+            "source": "MRP",
+            "target": "SUPABASE DATABASE",
+            "service": "PostgREST / PostgreSQL",
+            "resource": "mrp_snapshots",
+            "code": "MRP/mrp_conexao_patch.py · mrp_salvamento_compacto_patch.py",
+            "monitoring": "SEM TESTE DEDICADO",
+        },
+        {
+            "connection": "MRP → TRATATIVAS",
+            "source": "MRP",
+            "target": "SUPABASE DATABASE",
+            "service": "PostgREST / PostgreSQL",
+            "resource": "mrp_project_treatments · mrp_project_product_treatments",
+            "code": "MRP/app_mrp_runtime.py · mrp_tratativa_produto_patch.py",
+            "monitoring": "SEM TESTE DEDICADO",
+        },
+        {
+            "connection": "SETTA HUB → CONFIGURAÇÃO",
+            "source": "SETTA HUB",
+            "target": "SUPABASE DATABASE",
+            "service": "PostgREST",
+            "resource": "setta_hub_config",
+            "code": "SETTA-HUB/streamlit_app.py",
+            "monitoring": "SEM TESTE DEDICADO",
+        },
+    ]
+    return monitored + pending
+
+
+def _integration_location(item: dict) -> dict:
+    source = str(item.get("source_app") or "").upper()
+    target = str(item.get("target_app") or "").upper()
+    name = str(item.get("name") or "").upper()
+    haystack = " ".join((source, target, name))
+    if "CONVERSOR MRP" in haystack:
+        return {
+            "service": "Edge Function + Storage",
+            "resource": "setta-data-api · fontes e bases tratadas",
+            "code_location": "MRP-CONVERSOR/central_data.py · pipeline_sync.py",
+        }
+    if "MRP" in haystack and "CENTRAL" in haystack:
+        return {
+            "service": "Edge Function + Storage",
+            "resource": "setta-data-api · bundle/derived",
+            "code_location": "MRP/central_mrp_data.py",
+        }
+    if "MRP" in haystack:
+        return {
+            "service": "Central de Dados SETTA",
+            "resource": "relatorio_mrp",
+            "code_location": "MRP/mrp_central_data_patch.py",
+        }
+    return {
+        "service": str(item.get("service") or "Central de Dados SETTA"),
+        "resource": str(item.get("resource") or "—"),
+        "code_location": str(item.get("code_location") or "—"),
+    }
 
 
 
@@ -204,11 +420,13 @@ def list_integrations() -> list[dict]:
         item["resource_count"] = int(item.get("resource_count") or 0)
         item["expected_count"] = int(item.get("expected_count") or 0)
         item["rows_count"] = int(item.get("rows_count") or 0)
+        item.update(_integration_location(item))
         output.append(item)
     return output
 
 
 def list_apis(include_demo: bool = True) -> list[dict]:
+    ensure_system_apis()
     client = get_client()
     rows: list[dict] = []
     if client:
@@ -219,10 +437,30 @@ def list_apis(include_demo: bool = True) -> list[dict]:
     else:
         rows = _load_local()["apis"]
 
-    systems = system_apis()
-    system_ids = {str(item.get("id")) for item in systems}
+    configs = system_apis()
+    by_id = {str(row.get("id")): row for row in rows}
+    system_ids = {str(item.get("id")) for item in configs}
+    systems = [
+        {**config, **by_id.get(str(config["id"]), {})}
+        for config in configs
+    ]
+    # Metadados técnicos não pertencem à tabela; reaplica depois do overlay.
+    systems = [
+        {
+            **item,
+            **{
+                key: config.get(key)
+                for key in (
+                    "system", "health_mode", "request_json", "source_app",
+                    "target_app", "service", "resource", "code_location",
+                )
+            },
+        }
+        for item, config in zip(systems, configs)
+    ]
     custom = [row for row in rows if str(row.get("id")) not in system_ids]
     return systems + custom
+
 
 
 def save_api(payload: dict) -> dict:
@@ -292,6 +530,39 @@ def list_checks(api_id: str | None = None, limit: int = 200) -> list[dict]:
     if api_id:
         rows = [x for x in rows if x.get("api_id") == api_id]
     return sorted(rows, key=lambda x: x.get("checked_at", ""), reverse=True)[:limit]
+
+
+def list_check_summary(
+    api_id: str,
+    since_iso: str,
+    limit: int = 2000,
+) -> list[dict]:
+    client = get_client()
+    if client:
+        try:
+            return (
+                client.table("api_checks")
+                .select("checked_at,success,latency_ms")
+                .eq("api_id", api_id)
+                .gte("checked_at", since_iso)
+                .order("checked_at", desc=True)
+                .limit(limit)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            return []
+    rows = [
+        row for row in _load_local()["checks"]
+        if str(row.get("api_id")) == str(api_id)
+        and str(row.get("checked_at") or "") >= str(since_iso)
+    ]
+    return sorted(
+        rows,
+        key=lambda x: x.get("checked_at", ""),
+        reverse=True,
+    )[:limit]
 
 
 def save_check(api_id: str, result: dict) -> dict:
