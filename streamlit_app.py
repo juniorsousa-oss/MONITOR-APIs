@@ -66,7 +66,9 @@ def render_sidebar() -> str:
         # Não interromper uploads/processamentos com o refresh de 30 segundos.
         if page == "MONITOR DE APIs":
             st_autorefresh(
-                interval=30_000,
+                # O worker roda a cada 60 s; atualizar a UI mais rápido que isso
+                # só aumenta consumo sem produzir informação nova.
+                interval=60_000,
                 limit=None,
                 key="setta_monitor_refresh",
             )
