@@ -352,7 +352,7 @@ def render_monitor() -> None:
                     ]
                     st.dataframe(history[cols], use_container_width=True, hide_index=True)
 
-                if st.button("EXCLUIR API SELECIONADA", type="secondary"):
+                if not selected.get("system") and st.button("EXCLUIR API SELECIONADA", type="secondary"):
                     store.delete_api(str(selected.get("id")))
                     st.rerun()
 
