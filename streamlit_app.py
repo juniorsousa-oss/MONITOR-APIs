@@ -179,6 +179,38 @@ def render_api_registration() -> None:
 
 def render_monitor() -> None:
     raw_apis = store.list_apis(include_demo=True)
+
+    restart_id = str(st.query_params.get("restart_api") or "").strip()
+    if restart_id:
+        target = next(
+            (api for api in raw_apis if str(api.get("id") or "") == restart_id),
+            None,
+        )
+        try:
+            if target is None:
+                raise ValueError("API não encontrada.")
+            result = monitor.restart_api(target)
+            attempts = int(result.get("restart_attempts") or 1)
+            ok = bool(result.get("success"))
+            st.session_state["_api_restart_notice"] = {
+                "ok": ok,
+                "message": (
+                    f"{target.get('name')}: conexão restabelecida em {attempts} tentativa(s)."
+                    if ok
+                    else (
+                        f"{target.get('name')}: a reinicialização foi executada, mas a API continua "
+                        f"indisponível. {result.get('error_message') or 'Verifique a origem.'}"
+                    )
+                ),
+            }
+        except Exception as exc:
+            st.session_state["_api_restart_notice"] = {
+                "ok": False,
+                "message": f"Não foi possível reiniciar a API: {exc}",
+            }
+        st.query_params.clear()
+        st.rerun()
+
     apis = monitor.hydrate_all(raw_apis)
     integrations = store.list_integrations()
 
@@ -187,6 +219,13 @@ def render_monitor() -> None:
         "APIS • INTEGRAÇÕES • DISPONIBILIDADE",
         _monitor_pill(apis),
     )
+
+    restart_notice = st.session_state.pop("_api_restart_notice", None)
+    if restart_notice:
+        if restart_notice.get("ok"):
+            st.success(str(restart_notice.get("message") or "API reiniciada."))
+        else:
+            st.error(str(restart_notice.get("message") or "Falha ao reiniciar a API."))
 
     active = [x for x in apis if str(x.get("status")).upper() != "DESATIVADA"]
     online = sum(1 for x in active if str(x.get("status")).upper() == "ONLINE")
