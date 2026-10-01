@@ -66,9 +66,9 @@ def render_sidebar() -> str:
         # Não interromper uploads/processamentos com o refresh de 30 segundos.
         if page == "MONITOR DE APIs":
             st_autorefresh(
-                # O worker roda a cada 60 s; atualizar a UI mais rápido que isso
-                # só aumenta consumo sem produzir informação nova.
-                interval=60_000,
+                # O monitor 24/7 roda no Supabase a cada 2 minutos.
+                # A UI acompanha o mesmo ciclo para reduzir consumo no Streamlit.
+                interval=120_000,
                 limit=None,
                 key="setta_monitor_refresh",
             )
