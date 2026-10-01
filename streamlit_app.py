@@ -151,15 +151,17 @@ def _count_rows(name: str, raw: bytes) -> int:
 
 
 def _monitor_pill(apis: list[dict]) -> str:
+    if not store.supabase_enabled():
+        return "MODO LOCAL · SEM WORKER COMPARTILHADO"
     real = [x for x in apis if not x.get("demo")]
     if not real:
         return "SEM APIs"
     dates = [store.parse_dt(x.get("last_check_at")) for x in real]
     dates = [x for x in dates if x]
     if not dates:
-        return "AGUARDANDO PRIMEIRO CICLO"
+        return "WORKER · AGUARDANDO PRIMEIRO CICLO"
     age = (datetime.now(TZ) - max(dates)).total_seconds()
-    return "MONITORAMENTO ATIVO 24/7" if age <= 180 else "SEM CICLO RECENTE"
+    return "WORKER ATIVO 24/7" if age <= 180 else "WORKER · SEM CICLO RECENTE"
 
 
 def render_api_registration() -> None:
@@ -256,6 +258,14 @@ def render_monitor() -> None:
         "APIS • INTEGRAÇÕES • DISPONIBILIDADE",
         _monitor_pill(apis),
     )
+
+    if not store.supabase_enabled():
+        st.error(
+            "MONITOR EM MODO LOCAL: a interface não está usando um banco compartilhado. "
+            "Nesse modo o worker externo não consegue alimentar uptime, histórico e status "
+            "dos serviços. Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no ambiente "
+            "da interface e do worker com os mesmos valores."
+        )
 
     restart_notice = st.session_state.pop("_api_restart_notice", None)
     if restart_notice:
