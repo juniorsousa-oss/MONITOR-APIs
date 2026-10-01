@@ -226,6 +226,31 @@ def api_card(api: dict) -> str:
     uptime_text = "—" if uptime is None else f"{float(uptime):.2f}%"
     failures = int(api.get("consecutive_failures") or 0)
     meta = api.get("integration_meta") or {}
+    route_source = str(api.get("source_app") or "").strip()
+    route_target = str(api.get("target_app") or "").strip()
+    connection_html = ""
+    if any(
+        str(api.get(key) or "").strip()
+        for key in ("source_app", "target_app", "service", "resource", "code_location")
+    ):
+        route = (
+            f"{route_source} → {route_target}"
+            if route_source or route_target
+            else "—"
+        )
+        connection_html = (
+            '<div class="api-source-grid">'
+            '<div class="api-source-item"><div class="api-source-label">Conexão</div>'
+            f'<div class="api-source-value">{esc(route)}</div></div>'
+            '<div class="api-source-item"><div class="api-source-label">Serviço</div>'
+            f'<div class="api-source-value">{esc(api.get("service") or "—")}</div></div>'
+            '<div class="api-source-item"><div class="api-source-label">Recurso</div>'
+            f'<div class="api-source-value">{esc(api.get("resource") or "—")}</div></div>'
+            '<div class="api-source-item"><div class="api-source-label">Local da conexão</div>'
+            f'<div class="api-source-value">{esc(api.get("code_location") or "—")}</div></div>'
+            '</div>'
+        )
+
     source_html = ""
     if meta:
         carga = meta.get("carga_id")
@@ -272,6 +297,7 @@ def api_card(api: dict) -> str:
         f'<div class="api-metric"><div class="api-metric-label">Uptime 24h</div><div class="api-metric-value">{esc(uptime_text)}</div></div>'
         f'<div class="api-metric"><div class="api-metric-label">Falhas seguidas</div><div class="api-metric-value">{failures}</div></div>'
         '</div>'
+        f'{connection_html}'
         f'{source_html}'
         '<div class="api-foot">'
         '<div class="api-last">'
@@ -300,6 +326,16 @@ def integration_card(item: dict) -> str:
         if error
         else ""
     )
+    location_html = (
+        '<div class="api-source-grid">'
+        '<div class="api-source-item"><div class="api-source-label">Serviço</div>'
+        f'<div class="api-source-value">{esc(item.get("service") or "—")}</div></div>'
+        '<div class="api-source-item"><div class="api-source-label">Recurso</div>'
+        f'<div class="api-source-value">{esc(item.get("resource") or "—")}</div></div>'
+        '<div class="api-source-item"><div class="api-source-label">Local da conexão</div>'
+        f'<div class="api-source-value">{esc(item.get("code_location") or "—")}</div></div>'
+        '</div>'
+    )
 
     return (
         '<div class="integration-card" '
@@ -320,6 +356,7 @@ def integration_card(item: dict) -> str:
         '<div class="integration-meta"><div class="integration-meta-label">ESTADO</div>'
         f'<div class="integration-meta-value">{esc(item.get("version_label") or "—")}</div></div>'
         '</div>'
+        f'{location_html}'
         f'{error_html}'
         '</div>'
     )
