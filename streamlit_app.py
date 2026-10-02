@@ -749,10 +749,26 @@ def render_database() -> None:
                 fingerprint = hashlib.sha256(item["raw"]).hexdigest()
 
                 persisted_hash = str(source.get("content_sha256") or "").strip()
-                if persisted_hash == fingerprint:
+                normalized_current = bool(source.get("normalized_available"))
+                if persisted_hash == fingerprint and normalized_current:
                     skipped_names.append(source["name"])
                     done_hashes[source_key] = fingerprint
-                    status.write(f"{source['name']} já está atualizada com este mesmo arquivo. Pulando...")
+                    status.write(
+                        f"{source['name']} já está atualizada e normalizada. Pulando..."
+                    )
+                    progress.progress(index / total)
+                    continue
+
+                if persisted_hash == fingerprint and not normalized_current:
+                    status.write(
+                        f"{source['name']} já possui o bruto atual. Gerando formato técnico..."
+                    )
+                    try:
+                        store.backfill_normalized_source(source_key)
+                        updated_names.append(source["name"])
+                        done_hashes[source_key] = fingerprint
+                    except Exception as exc:
+                        failed_sources.append((source["name"], str(exc)))
                     progress.progress(index / total)
                     continue
 
