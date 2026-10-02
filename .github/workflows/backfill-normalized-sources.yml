@@ -4,6 +4,9 @@ on:
   push:
     paths:
       - ".github/workflows/backfill-normalized-sources.yml"
+      - ".github/scripts/backfill_normalized_sources.py"
+      - "data_store.py"
+      - "requirements.txt"
   workflow_dispatch:
 
 permissions:
