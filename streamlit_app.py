@@ -701,6 +701,14 @@ def render_database() -> None:
                 source_key = source["source_key"]
                 fingerprint = hashlib.sha256(item["raw"]).hexdigest()
 
+                persisted_hash = str(source.get("content_sha256") or "").strip()
+                if persisted_hash == fingerprint:
+                    skipped_names.append(source["name"])
+                    done_hashes[source_key] = fingerprint
+                    status.write(f"{source['name']} já está atualizada com este mesmo arquivo. Pulando...")
+                    progress.progress(index / total)
+                    continue
+
                 if done_hashes.get(source_key) == fingerprint:
                     skipped_names.append(source["name"])
                     status.write(f"{source['name']} já concluída neste lote. Pulando...")
