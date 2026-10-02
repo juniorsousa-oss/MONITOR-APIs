@@ -320,7 +320,62 @@ def _central_derived_download_status(
     }
 
 
+def _normalize_system_probe(api: dict) -> dict:
+    """Completa metadados dos probes fixos mesmo quando vierem do banco como custom."""
+    item = dict(api or {})
+    api_id = str(item.get("id") or "")
+    name = str(item.get("name") or "").upper()
+
+    if api_id == "11111111-1111-4111-8111-111111111107" or "ESTOQUE TRATADO — PIPELINE" in name:
+        item.setdefault("health_mode", "CENTRAL_PIPELINE_STATE")
+        item.setdefault("request_json", {
+            "action": "pipeline_state",
+            "payload": {"source_keys": ["analitico", "endereco"], "derived_key": "estoque_tratado"},
+        })
+    elif api_id == "11111111-1111-4111-8111-111111111108" or "COMPRAS TRATADO — PIPELINE" in name:
+        item.setdefault("health_mode", "CENTRAL_PIPELINE_STATE")
+        item.setdefault("request_json", {
+            "action": "pipeline_state",
+            "payload": {"source_keys": ["sc", "pc", "pre_nota"], "derived_key": "compras_tratado"},
+        })
+    elif api_id == "11111111-1111-4111-8111-111111111109" or "TCTP TRATADO — PIPELINE" in name:
+        item.setdefault("health_mode", "CENTRAL_PIPELINE_STATE")
+        item.setdefault("request_json", {
+            "action": "pipeline_state",
+            "payload": {"source_keys": ["pmp", "h001"], "derived_key": "tctp_tratado"},
+        })
+    elif api_id == "11111111-1111-4111-8111-111111111110" or "INVENTÁRIO ROTATIVO → CENTRAL" in name:
+        item.setdefault("health_mode", "CENTRAL_CONSUMER_SYNC")
+        item.setdefault("expected_source_keys", ["analitico", "endereco"])
+        item.setdefault("request_json", {
+            "action": "consumer_sync_status",
+            "payload": {"consumer_key": "inventario_rotativo"},
+        })
+    elif api_id == "11111111-1111-4111-8111-111111111111" or "FECHAMENTO MENSAL → CENTRAL" in name:
+        item.setdefault("health_mode", "CENTRAL_CONSUMER_SYNC")
+        item.setdefault("expected_source_keys", ["analitico", "cadastros"])
+        item.setdefault("request_json", {
+            "action": "consumer_sync_status",
+            "payload": {"consumer_key": "fechamento_mensal"},
+        })
+    elif api_id == "11111111-1111-4111-8111-111111111112" or "CONTROLE DE NFS → CENTRAL" in name:
+        item.setdefault("health_mode", "CENTRAL_CONSUMER_SYNC")
+        item.setdefault("expected_source_keys", ["nf", "mes_pre_notas"])
+        item.setdefault("request_json", {
+            "action": "consumer_sync_status",
+            "payload": {"consumer_key": "controle_nfs"},
+        })
+    elif api_id == "11111111-1111-4111-8111-111111111118" or "INVENTÁRIO → ESTOQUE TRATADO" in name:
+        item.setdefault("health_mode", "CENTRAL_DERIVED_DOWNLOAD")
+        item.setdefault("request_json", {
+            "action": "derived_download",
+            "payload": {"base_key": "estoque_tratado"},
+        })
+    return item
+
+
 def check_api(api: dict) -> dict:
+    api = _normalize_system_probe(api)
     checked_at = store.now_iso()
     endpoint = str(api.get("endpoint") or "").strip()
     if not endpoint:
