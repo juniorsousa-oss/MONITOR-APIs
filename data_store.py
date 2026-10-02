@@ -1038,10 +1038,11 @@ DERIVED_CATALOG = [
 
 
 def list_sources() -> list[dict]:
+    keys = [item["key"] for item in SOURCE_CATALOG]
     try:
         rows = central_api_call(
             "source_status",
-            {"keys": [item["key"] for item in SOURCE_CATALOG]},
+            {"keys": keys},
             timeout=30,
         ).get("data") or []
         by_key = {
@@ -1052,9 +1053,25 @@ def list_sources() -> list[dict]:
     except Exception:
         by_key = {}
 
+    try:
+        normalized_rows = central_api_call(
+            "source_normalized_status",
+            {"keys": keys},
+            timeout=30,
+        ).get("data") or []
+        normalized_by_key = {
+            str(row.get("source_key")): row
+            for row in normalized_rows
+            if isinstance(row, dict)
+        }
+    except Exception:
+        normalized_by_key = {}
+
     result = []
     for base in SOURCE_CATALOG:
         row = by_key.get(base["key"], {})
+        normalized = normalized_by_key.get(base["key"], {})
+        normalized_current = bool(normalized.get("available"))
         result.append(
             {
                 "source_key": base["key"],
@@ -1071,9 +1088,16 @@ def list_sources() -> list[dict]:
                 "content_sha256": row.get("content_sha256") or "",
                 "version": int(row.get("version") or 0),
                 "available": bool(row.get("available")),
-                "normalized_format": row.get("normalized_format") or "",
-                "normalized_at": row.get("normalized_at"),
-                "normalized_storage_path": row.get("normalized_storage_path") or "",
+                "normalized_available": normalized_current,
+                "normalized_stale": bool(normalized.get("stale")),
+                "normalized_version": int(normalized.get("source_version") or 0),
+                "normalized_format": normalized.get("format") or "",
+                "normalized_at": normalized.get("normalized_at"),
+                "normalized_storage_path": (
+                    normalized.get("storage_path") or ""
+                    if normalized_current
+                    else ""
+                ),
             }
         )
     return result
@@ -1206,6 +1230,7 @@ def _publish_normalized_source(
     source_key: str,
     normalized: bytes,
     normalized_rows: int,
+    source_version: int,
 ) -> dict:
     prepared = central_api_call(
         "source_normalized_upload_prepare",
@@ -1223,13 +1248,19 @@ def _publish_normalized_source(
         token=token,
         file=normalized,
     )
-    return {
-        "normalized_storage_path": path,
-        "normalized_format": "SETTA_SOURCE_V1",
-        "normalized_mime_type": "application/gzip",
-        "normalized_rows_count": int(normalized_rows),
-        "normalized_sha256": hashlib.sha256(normalized).hexdigest(),
-    }
+
+    return central_api_call(
+        "source_normalized_commit",
+        {
+            "source_key": source_key,
+            "source_version": int(source_version),
+            "rows_count": int(normalized_rows),
+            "format": "SETTA_SOURCE_V1",
+            "profile": "WORKBOOK_MATRIX_V1",
+            "content_sha256": hashlib.sha256(normalized).hexdigest(),
+        },
+        timeout=45,
+    ).get("data") or {}
 
 
 def backfill_normalized_source(source_key: str) -> dict:
@@ -1258,20 +1289,12 @@ def backfill_normalized_source(source_key: str) -> dict:
             f"A fonte {source_key} não está em um formato tabular normalizável."
         )
 
-    normalized_meta = _publish_normalized_source(
+    return _publish_normalized_source(
         source_key,
         normalized,
         normalized_rows,
+        int(meta.get("version") or 0),
     )
-    return central_api_call(
-        "source_normalized_commit",
-        {
-            "source_key": source_key,
-            **normalized_meta,
-        },
-        timeout=45,
-    ).get("data") or {}
-
 
 
 def save_report(
@@ -1282,20 +1305,27 @@ def save_report(
     origin: str = "UPLOAD",
     max_attempts: int = 3,
 ) -> dict:
-    """Publica bruto + representação técnica normalizada em uma única carga.
+    """Publica bruto + representação técnica normalizada na mesma carga.
 
-    Excel/CSV é interpretado somente aqui. O arquivo original fica preservado
-    para auditoria, enquanto os aplicativos consomem SETTA_SOURCE_V1.
+    O arquivo tabular é interpretado somente no ponto de entrada. O original
+    fica preservado para auditoria/contingência; consumidores usam
+    SETTA_SOURCE_V1.
     """
-    attempts = max(1, int(max_attempts or 1))
-    last_error: Exception | None = None
-
     normalized, normalized_rows = build_normalized_source(
         source_key,
         file_name,
         raw,
     )
+    if not normalized:
+        raise ValueError(
+            f"A fonte {source_key} precisa ser tabular para entrar na Central normalizada."
+        )
 
+    attempts = max(1, int(max_attempts or 1))
+    last_error: Exception | None = None
+    committed: dict[str, Any] | None = None
+
+    # 1) Publica o bruto e registra uma única nova versão.
     for attempt in range(1, attempts + 1):
         try:
             prepared = central_api_call(
@@ -1315,36 +1345,50 @@ def save_report(
                 file=raw,
             )
 
-            normalized_meta: dict[str, Any] = {}
-            if normalized:
-                normalized_meta = _publish_normalized_source(
-                    source_key,
-                    normalized,
-                    normalized_rows,
-                )
-
             content_sha256 = hashlib.sha256(raw).hexdigest()
             committed = central_api_call(
                 "source_commit",
                 {
                     "source_key": source_key,
                     "file_name": file_name,
-                    "rows_count": int(rows_count),
+                    "rows_count": int(rows_count or normalized_rows),
                     "mime_type": "application/octet-stream",
                     "content_sha256": content_sha256,
-                    **normalized_meta,
                 },
                 timeout=45,
             ).get("data") or {}
-            return committed
+            break
         except Exception as exc:
             last_error = exc
             if attempt < attempts:
                 time.sleep(1.5 * attempt)
 
+    if not committed:
+        raise RuntimeError(
+            f"Falha ao publicar {source_key} após {attempts} tentativa(s): {last_error}"
+        ) from last_error
+
+    # 2) Publica a representação técnica vinculada exatamente à versão acima.
+    normalized_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            normalized_meta = _publish_normalized_source(
+                source_key,
+                normalized,
+                normalized_rows,
+                int(committed.get("version") or 0),
+            )
+            return {**committed, "normalized": normalized_meta}
+        except Exception as exc:
+            normalized_error = exc
+            if attempt < attempts:
+                time.sleep(1.5 * attempt)
+
     raise RuntimeError(
-        f"Falha ao publicar {source_key} após {attempts} tentativa(s): {last_error}"
-    ) from last_error
+        "Arquivo bruto salvo, mas a normalização técnica ficou pendente: "
+        f"{normalized_error}"
+    ) from normalized_error
+
 
 def list_imports(source_key: str | None = None, limit: int = 100) -> list[dict]:
     client = get_client()
