@@ -1,0 +1,30 @@
+name: Backfill normalized sources
+
+on:
+  push:
+    paths:
+      - ".github/workflows/backfill-normalized-sources.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Normalize current SETTA sources
+        run: python .github/scripts/backfill_normalized_sources.py
