@@ -200,9 +200,19 @@ def _central_consumer_sync_status(response: requests.Response, latency: float, a
     expected = [str(x) for x in (api.get("expected_source_keys") or [])]
     by_key = {str(row.get("source_key") or ""): row for row in rows}
     missing = [key for key in expected if key not in by_key]
+    warning = [
+        key for key in expected
+        if key in by_key and str(by_key[key].get("status") or "").upper() in {"ATENÇÃO", "ATENCAO", "WARNING"}
+    ]
     failed = [
         key for key in expected
-        if key in by_key and str(by_key[key].get("status") or "").upper() not in {"ATUALIZADO", "OK", "ONLINE"}
+        if key in by_key and str(by_key[key].get("status") or "").upper() in {"ERRO", "OFFLINE", "FALHA"}
+    ]
+    unknown = [
+        key for key in expected
+        if key in by_key
+        and str(by_key[key].get("status") or "").upper()
+        not in {"ATUALIZADO", "OK", "ONLINE", "ATENÇÃO", "ATENCAO", "WARNING", "ERRO", "OFFLINE", "FALHA"}
     ]
     if missing:
         return {**base, "status": "ATENÇÃO", "success": False, "error_message": "Sincronização ausente: " + ", ".join(missing), "incident_kind": "SINCRONIZAÇÃO"}
@@ -212,6 +222,14 @@ def _central_consumer_sync_status(response: requests.Response, latency: float, a
             row = by_key[key]
             details.append(f"{key}: {row.get('status') or 'SEM STATUS'}")
         return {**base, "status": "OFFLINE", "success": False, "error_message": "Falha de sincronização · " + " · ".join(details), "incident_kind": "SINCRONIZAÇÃO"}
+    if warning or unknown:
+        keys = warning + unknown
+        details = []
+        for key in keys:
+            row = by_key[key]
+            msg = str(row.get("error_message") or "").strip()
+            details.append(f"{key}: {row.get('status') or 'SEM STATUS'}" + (f" · {msg}" if msg else ""))
+        return {**base, "status": "ATENÇÃO", "success": True, "error_message": "Sincronização requer atenção · " + " · ".join(details), "incident_kind": "SINCRONIZAÇÃO"}
     warning_latency = max(1, int(api.get("warning_latency_ms") or 1800))
     return {
         **base,
