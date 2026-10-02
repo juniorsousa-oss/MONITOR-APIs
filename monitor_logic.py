@@ -558,6 +558,7 @@ def _hydrate_from_checks(api: dict, checks: list[dict]) -> dict:
         for item in reversed(checks[:12])
         if item.get("latency_ms") is not None
     ]
+    latest_check = checks[0] if checks else {}
     return {
         **api,
         "status": (
@@ -570,6 +571,7 @@ def _hydrate_from_checks(api: dict, checks: list[dict]) -> dict:
         "uptime_24h": uptime,
         "uptime_samples": len(checks),
         "latency_history": history,
+        "error_message": str(latest_check.get("error_message") or ""),
         "last_check_label": store.format_dt(api.get("last_check_at")),
         "last_success_label": store.format_dt(api.get("last_success_at")),
     }
