@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import re
 import zipfile
@@ -688,33 +689,66 @@ def render_database() -> None:
             status = st.empty()
             total = len(selected_sources)
             updated_names = []
-            try:
-                for index, source in enumerate(selected_sources, start=1):
-                    item = uploads[source["source_key"]]
-                    status.write(f"Atualizando {source['name']}...")
+            skipped_names = []
+            failed_sources = []
+
+            done_hashes = st.session_state.setdefault(
+                "_central_batch_done_hashes", {}
+            )
+
+            for index, source in enumerate(selected_sources, start=1):
+                item = uploads[source["source_key"]]
+                source_key = source["source_key"]
+                fingerprint = hashlib.sha256(item["raw"]).hexdigest()
+
+                if done_hashes.get(source_key) == fingerprint:
+                    skipped_names.append(source["name"])
+                    status.write(f"{source['name']} já concluída neste lote. Pulando...")
+                    progress.progress(index / total)
+                    continue
+
+                status.write(f"Atualizando {source['name']}...")
+                try:
                     store.save_report(
-                        source["source_key"],
+                        source_key,
                         item["file"].name,
                         item["raw"],
                         rows_count=item["rows_count"],
                         origin=source.get("source_system") or "UPLOAD",
+                        max_attempts=3,
                     )
                     updated_names.append(source["name"])
-                    progress.progress(index / total)
+                    done_hashes[source_key] = fingerprint
+                except Exception as exc:
+                    failed_sources.append((source["name"], str(exc)))
 
-                status.empty()
-                progress.empty()
+                progress.progress(index / total)
+
+            status.empty()
+            progress.empty()
+
+            if failed_sources:
+                completed = updated_names + skipped_names
+                if completed:
+                    st.success(
+                        f"{len(completed)} fonte(s) concluída(s) neste lote: "
+                        + " • ".join(completed)
+                    )
+                st.error(
+                    "Não foi possível concluir: "
+                    + " • ".join(
+                        f"{name} — {error}"
+                        for name, error in failed_sources
+                    )
+                    + ". Clique novamente em ATUALIZAR FONTES para retomar apenas as fontes pendentes."
+                )
+            else:
+                st.session_state.pop("_central_batch_done_hashes", None)
                 st.success(
-                    f"{len(updated_names)} fonte(s) atualizada(s): "
-                    + " • ".join(updated_names)
+                    f"{len(updated_names) + len(skipped_names)} fonte(s) atualizada(s): "
+                    + " • ".join(updated_names + skipped_names)
                 )
                 st.rerun()
-            except Exception as exc:
-                st.error(
-                    "Falha durante a carga. Fontes concluídas antes do erro: "
-                    + (" • ".join(updated_names) if updated_names else "nenhuma")
-                    + f". Erro: {exc}"
-                )
 
     st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
     section_band(
