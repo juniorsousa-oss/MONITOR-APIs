@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import time
 import uuid
 
 import requests
@@ -1109,35 +1110,56 @@ def save_report(
     raw: bytes,
     rows_count: int = 0,
     origin: str = "UPLOAD",
+    max_attempts: int = 3,
 ) -> dict:
-    prepared = central_api_call(
-        "source_upload_prepare",
-        {"source_key": source_key},
-        timeout=30,
-    )
-    path = str(prepared.get("path") or "")
-    token = str(prepared.get("token") or "")
-    if not path or not token:
-        raise RuntimeError("A Central não retornou autorização para upload.")
+    """Publica uma fonte com novas tentativas em falhas transitórias.
 
-    client = central_client()
-    client.storage.from_("setta-data").upload_to_signed_url(
-        path=path,
-        token=token,
-        file=raw,
-    )
+    Cada tentativa solicita um novo signed upload token e recria o cliente
+    de Storage. Isso evita que uma conexão HTTP/2 interrompida contamine
+    as próximas fontes do mesmo lote.
+    """
+    attempts = max(1, int(max_attempts or 1))
+    last_error: Exception | None = None
 
-    committed = central_api_call(
-        "source_commit",
-        {
-            "source_key": source_key,
-            "file_name": file_name,
-            "rows_count": int(rows_count),
-            "mime_type": "application/octet-stream",
-        },
-        timeout=30,
-    ).get("data") or {}
-    return committed
+    for attempt in range(1, attempts + 1):
+        try:
+            prepared = central_api_call(
+                "source_upload_prepare",
+                {"source_key": source_key},
+                timeout=45,
+            )
+            path = str(prepared.get("path") or "")
+            token = str(prepared.get("token") or "")
+            if not path or not token:
+                raise RuntimeError("A Central não retornou autorização para upload.")
+
+            # Cliente novo a cada tentativa: não reaproveita conexão HTTP/2 quebrada.
+            client = central_client()
+            client.storage.from_("setta-data").upload_to_signed_url(
+                path=path,
+                token=token,
+                file=raw,
+            )
+
+            committed = central_api_call(
+                "source_commit",
+                {
+                    "source_key": source_key,
+                    "file_name": file_name,
+                    "rows_count": int(rows_count),
+                    "mime_type": "application/octet-stream",
+                },
+                timeout=45,
+            ).get("data") or {}
+            return committed
+        except Exception as exc:
+            last_error = exc
+            if attempt < attempts:
+                time.sleep(1.5 * attempt)
+
+    raise RuntimeError(
+        f"Falha ao publicar {source_key} após {attempts} tentativa(s): {last_error}"
+    ) from last_error
 
 
 def list_imports(source_key: str | None = None, limit: int = 100) -> list[dict]:
