@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import gzip
+import hashlib
 import io
 import json
 import os
 import time
 import uuid
 
+import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1068,6 +1071,9 @@ def list_sources() -> list[dict]:
                 "content_sha256": row.get("content_sha256") or "",
                 "version": int(row.get("version") or 0),
                 "available": bool(row.get("available")),
+                "normalized_format": row.get("normalized_format") or "",
+                "normalized_at": row.get("normalized_at"),
+                "normalized_storage_path": row.get("normalized_storage_path") or "",
             }
         )
     return result
@@ -1105,6 +1111,169 @@ def list_derived_bases() -> list[dict]:
     return result
 
 
+
+def _frame_values(frame: pd.DataFrame) -> list[list[Any]]:
+    """Converte DataFrame para valores JSON preservando datas e nulos."""
+    if frame is None:
+        return []
+    text = frame.to_json(
+        orient="values",
+        date_format="iso",
+        force_ascii=False,
+    )
+    return json.loads(text)
+
+
+def build_normalized_source(
+    source_key: str,
+    file_name: str,
+    raw: bytes,
+) -> tuple[bytes, int]:
+    """Converte a fonte uma única vez para o pacote técnico SETTA_SOURCE_V1.
+
+    O Excel original continua no Storage para auditoria. Os consumidores
+    devem usar o pacote normalizado e só recorrer ao bruto como contingência.
+    """
+    suffix = Path(str(file_name or "").lower()).suffix
+    sheets: list[dict[str, Any]] = []
+
+    if suffix in {".xlsx", ".xlsm", ".xltx", ".xls"}:
+        engine = "xlrd" if suffix == ".xls" else "openpyxl"
+        book = pd.ExcelFile(io.BytesIO(raw), engine=engine)
+        for index, sheet_name in enumerate(book.sheet_names):
+            frame = pd.read_excel(
+                book,
+                sheet_name=sheet_name,
+                header=None,
+                dtype=object,
+            )
+            sheets.append(
+                {
+                    "index": index,
+                    "name": str(sheet_name),
+                    "rows": _frame_values(frame),
+                    "row_count": int(len(frame)),
+                    "column_count": int(frame.shape[1]),
+                }
+            )
+    elif suffix == ".csv":
+        frame = None
+        last_error: Exception | None = None
+        for sep in (None, ";", ",", "\t"):
+            try:
+                frame = pd.read_csv(
+                    io.BytesIO(raw),
+                    header=None,
+                    dtype=object,
+                    sep=sep,
+                    engine="python" if sep is None else "c",
+                )
+                if frame.shape[1] > 1 or sep == "\t":
+                    break
+            except Exception as exc:
+                last_error = exc
+                frame = None
+        if frame is None:
+            raise ValueError(f"Não foi possível normalizar o CSV: {last_error}")
+        sheets.append(
+            {
+                "index": 0,
+                "name": "CSV",
+                "rows": _frame_values(frame),
+                "row_count": int(len(frame)),
+                "column_count": int(frame.shape[1]),
+            }
+        )
+    else:
+        return b"", 0
+
+    payload = {
+        "format": "SETTA_SOURCE_V1",
+        "source_key": str(source_key),
+        "file_name": str(file_name),
+        "sheets": sheets,
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    normalized = gzip.compress(encoded, compresslevel=6)
+    return normalized, sum(int(sheet["row_count"]) for sheet in sheets)
+
+
+def _publish_normalized_source(
+    source_key: str,
+    normalized: bytes,
+    normalized_rows: int,
+) -> dict:
+    prepared = central_api_call(
+        "source_normalized_upload_prepare",
+        {"source_key": source_key},
+        timeout=45,
+    )
+    path = str(prepared.get("path") or "")
+    token = str(prepared.get("token") or "")
+    if not path or not token:
+        raise RuntimeError("A Central não autorizou o upload da fonte normalizada.")
+
+    client = central_client()
+    client.storage.from_("setta-data").upload_to_signed_url(
+        path=path,
+        token=token,
+        file=normalized,
+    )
+    return {
+        "normalized_storage_path": path,
+        "normalized_format": "SETTA_SOURCE_V1",
+        "normalized_mime_type": "application/gzip",
+        "normalized_rows_count": int(normalized_rows),
+        "normalized_sha256": hashlib.sha256(normalized).hexdigest(),
+    }
+
+
+def backfill_normalized_source(source_key: str) -> dict:
+    """Normaliza uma fonte já existente sem alterar sua versão de negócio."""
+    meta = central_api_call(
+        "source_download",
+        {"source_key": source_key},
+        timeout=30,
+    ).get("data") or {}
+    signed_url = str(meta.get("signed_url") or "")
+    if not signed_url:
+        raise RuntimeError(f"Fonte {source_key} sem arquivo bruto disponível.")
+
+    response = requests.get(signed_url, timeout=180)
+    response.raise_for_status()
+    raw = response.content
+    file_name = str(meta.get("last_file_name") or source_key)
+
+    normalized, normalized_rows = build_normalized_source(
+        source_key,
+        file_name,
+        raw,
+    )
+    if not normalized:
+        raise ValueError(
+            f"A fonte {source_key} não está em um formato tabular normalizável."
+        )
+
+    normalized_meta = _publish_normalized_source(
+        source_key,
+        normalized,
+        normalized_rows,
+    )
+    return central_api_call(
+        "source_normalized_commit",
+        {
+            "source_key": source_key,
+            **normalized_meta,
+        },
+        timeout=45,
+    ).get("data") or {}
+
+
+
 def save_report(
     source_key: str,
     file_name: str,
@@ -1113,14 +1282,19 @@ def save_report(
     origin: str = "UPLOAD",
     max_attempts: int = 3,
 ) -> dict:
-    """Publica uma fonte com novas tentativas em falhas transitórias.
+    """Publica bruto + representação técnica normalizada em uma única carga.
 
-    Cada tentativa solicita um novo signed upload token e recria o cliente
-    de Storage. Isso evita que uma conexão HTTP/2 interrompida contamine
-    as próximas fontes do mesmo lote.
+    Excel/CSV é interpretado somente aqui. O arquivo original fica preservado
+    para auditoria, enquanto os aplicativos consomem SETTA_SOURCE_V1.
     """
     attempts = max(1, int(max_attempts or 1))
     last_error: Exception | None = None
+
+    normalized, normalized_rows = build_normalized_source(
+        source_key,
+        file_name,
+        raw,
+    )
 
     for attempt in range(1, attempts + 1):
         try:
@@ -1134,7 +1308,6 @@ def save_report(
             if not path or not token:
                 raise RuntimeError("A Central não retornou autorização para upload.")
 
-            # Cliente novo a cada tentativa: não reaproveita conexão HTTP/2 quebrada.
             client = central_client()
             client.storage.from_("setta-data").upload_to_signed_url(
                 path=path,
@@ -1142,7 +1315,15 @@ def save_report(
                 file=raw,
             )
 
-            content_sha256 = __import__("hashlib").sha256(raw).hexdigest()
+            normalized_meta: dict[str, Any] = {}
+            if normalized:
+                normalized_meta = _publish_normalized_source(
+                    source_key,
+                    normalized,
+                    normalized_rows,
+                )
+
+            content_sha256 = hashlib.sha256(raw).hexdigest()
             committed = central_api_call(
                 "source_commit",
                 {
@@ -1151,6 +1332,7 @@ def save_report(
                     "rows_count": int(rows_count),
                     "mime_type": "application/octet-stream",
                     "content_sha256": content_sha256,
+                    **normalized_meta,
                 },
                 timeout=45,
             ).get("data") or {}
@@ -1163,7 +1345,6 @@ def save_report(
     raise RuntimeError(
         f"Falha ao publicar {source_key} após {attempts} tentativa(s): {last_error}"
     ) from last_error
-
 
 def list_imports(source_key: str | None = None, limit: int = 100) -> list[dict]:
     client = get_client()
