@@ -1065,6 +1065,7 @@ def list_sources() -> list[dict]:
                 "rows_count": row.get("rows_count") or 0,
                 "origin": row.get("origin") or base["source_system"],
                 "last_file_name": row.get("last_file_name") or "",
+                "content_sha256": row.get("content_sha256") or "",
                 "version": int(row.get("version") or 0),
                 "available": bool(row.get("available")),
             }
@@ -1141,6 +1142,7 @@ def save_report(
                 file=raw,
             )
 
+            content_sha256 = __import__("hashlib").sha256(raw).hexdigest()
             committed = central_api_call(
                 "source_commit",
                 {
@@ -1148,6 +1150,7 @@ def save_report(
                     "file_name": file_name,
                     "rows_count": int(rows_count),
                     "mime_type": "application/octet-stream",
+                    "content_sha256": content_sha256,
                 },
                 timeout=45,
             ).get("data") or {}
