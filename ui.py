@@ -238,6 +238,17 @@ def api_card(api: dict) -> str:
             if route_source or route_target
             else "—"
         )
+        attention_reason = str(api.get("error_message") or "").strip()
+        if status == "ATENÇÃO" and attention_reason:
+            criterion_label = "Motivo da atenção"
+            criterion_value = attention_reason
+        elif status == "OFFLINE" and attention_reason:
+            criterion_label = "Motivo da falha"
+            criterion_value = attention_reason
+        else:
+            criterion_label = "Critério de atenção"
+            criterion_value = f"LATÊNCIA ≥ {api.get('warning_latency_ms') or 1000} ms"
+
         connection_html = (
             '<div class="api-source-grid">'
             '<div class="api-source-item"><div class="api-source-label">Conexão</div>'
@@ -248,8 +259,8 @@ def api_card(api: dict) -> str:
             f'<div class="api-source-value">{esc(api.get("resource") or "—")}</div></div>'
             '<div class="api-source-item"><div class="api-source-label">Local da conexão</div>'
             f'<div class="api-source-value">{esc(api.get("code_location") or "—")}</div></div>'
-            '<div class="api-source-item"><div class="api-source-label">Critério de atenção</div>'
-            f'<div class="api-source-value">LATÊNCIA ≥ {esc(api.get("warning_latency_ms") or 1000)} ms</div></div>'
+            f'<div class="api-source-item"><div class="api-source-label">{esc(criterion_label)}</div>'
+            f'<div class="api-source-value">{esc(criterion_value)}</div></div>'
             '</div>'
         )
 
