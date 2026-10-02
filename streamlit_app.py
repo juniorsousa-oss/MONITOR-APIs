@@ -582,6 +582,53 @@ def render_database() -> None:
         unsafe_allow_html=True,
     )
 
+    normalizadas = [
+        item for item in sources
+        if str(item.get("normalized_storage_path") or "").strip()
+    ]
+    pendentes_normalizacao = [
+        item for item in sources
+        if bool(item.get("available"))
+        and not str(item.get("normalized_storage_path") or "").strip()
+    ]
+    st.caption(
+        f"FORMATO TÉCNICO · {len(normalizadas)}/{len([x for x in sources if x.get('available')])} "
+        "fonte(s) disponível(is) normalizada(s) em SETTA_SOURCE_V1."
+    )
+    if pendentes_normalizacao:
+        if st.button(
+            "NORMALIZAR FONTES EXISTENTES",
+            use_container_width=True,
+            key="normalize_existing_sources",
+        ):
+            progress = st.progress(0)
+            status = st.empty()
+            ok = []
+            failed = []
+            total_pending = len(pendentes_normalizacao)
+            for idx, source in enumerate(pendentes_normalizacao, start=1):
+                key = str(source.get("source_key") or "")
+                status.write(f"Normalizando {source.get('name') or key}...")
+                try:
+                    store.backfill_normalized_source(key)
+                    ok.append(source.get("name") or key)
+                except Exception as exc:
+                    failed.append((source.get("name") or key, str(exc)))
+                progress.progress(idx / total_pending)
+            status.empty()
+            progress.empty()
+            if ok:
+                st.success(
+                    f"{len(ok)} fonte(s) normalizada(s): " + " • ".join(map(str, ok))
+                )
+            if failed:
+                st.error(
+                    "Falha em: "
+                    + " • ".join(f"{name} — {error}" for name, error in failed)
+                )
+            if ok and not failed:
+                st.rerun()
+
     st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
     section_band(
         "02 · PROCESSAMENTO",
