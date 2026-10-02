@@ -419,7 +419,7 @@ def system_apis() -> list[dict]:
         },
         {
             "id": "11111111-1111-4111-8111-111111111115",
-            "name": "MRP → TRATATIVAS",
+            "name": "MRP → TRATATIVAS DE PROJETO",
             "app_name": "Persistência das tratativas por projeto",
             "endpoint": (
                 "https://cuixazpxkvniqldmmnth.supabase.co/"
@@ -435,8 +435,52 @@ def system_apis() -> list[dict]:
             "source_app": "MRP",
             "target_app": "SUPABASE DATABASE",
             "service": "PostgREST / PostgreSQL",
-            "resource": "mrp_project_treatments · mrp_project_product_treatments",
+            "resource": "mrp_project_treatments",
             "code_location": "MRP/app_mrp_runtime.py · mrp_tratativa_produto_patch.py",
+        },
+        {
+            "id": "11111111-1111-4111-8111-111111111117",
+            "name": "MRP → TRATATIVAS DE PRODUTO",
+            "app_name": "Persistência das tratativas por produto",
+            "endpoint": (
+                "https://cuixazpxkvniqldmmnth.supabase.co/"
+                "rest/v1/mrp_project_product_treatments?select=*&limit=1"
+            ),
+            "method": "GET",
+            "expected_status": 200,
+            "timeout_seconds": 15,
+            "warning_latency_ms": 1200,
+            "active": True,
+            "secret_ref": "__GESTAO_ENTREGAS_ANON__",
+            "system": True,
+            "source_app": "MRP",
+            "target_app": "SUPABASE DATABASE",
+            "service": "PostgREST / PostgreSQL",
+            "resource": "mrp_project_product_treatments",
+            "code_location": "MRP/mrp_tratativa_produto_patch.py",
+        },
+        {
+            "id": "11111111-1111-4111-8111-111111111118",
+            "name": "INVENTÁRIO → ESTOQUE TRATADO",
+            "app_name": "Leitura da base tratada no Banco de Dados do Inventário",
+            "endpoint": central_endpoint,
+            "method": "POST",
+            "expected_status": 200,
+            "timeout_seconds": 25,
+            "warning_latency_ms": 2500,
+            "active": True,
+            "secret_ref": "__GESTAO_ENTREGAS_ANON__",
+            "health_mode": "CENTRAL_DERIVED_DOWNLOAD",
+            "request_json": {
+                "action": "derived_download",
+                "payload": {"base_key": "estoque_tratado"},
+            },
+            "system": True,
+            "source_app": "INVENTÁRIO ROTATIVO",
+            "target_app": "SUPABASE STORAGE",
+            "service": "Supabase Edge Function + Storage",
+            "resource": "setta-data · estoque_tratado",
+            "code_location": "INVENTARIO-ROTATIVO-SETTA/central_inventory_data.py",
         },
         {
             "id": "11111111-1111-4111-8111-111111111116",
