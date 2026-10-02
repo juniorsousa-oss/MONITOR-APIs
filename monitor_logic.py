@@ -130,6 +130,103 @@ def _central_action_status(response: requests.Response, latency: float, api: dic
     }
 
 
+def _central_pipeline_state_status(response: requests.Response, latency: float, api: dict) -> dict:
+    base = _central_action_status(response, latency, api)
+    if not base["success"]:
+        return base
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    data = data if isinstance(data, dict) else {}
+    sources = [row for row in (data.get("sources") or []) if isinstance(row, dict)]
+    derived = data.get("derived") if isinstance(data.get("derived"), dict) else {}
+    unavailable = [str(row.get("source_key") or "") for row in sources if not bool(row.get("available"))]
+    if unavailable:
+        return {**base, "status": "OFFLINE", "success": False, "error_message": "Fonte(s) indisponível(is): " + ", ".join(unavailable), "incident_kind": "FONTE INDISPONÍVEL"}
+    if not bool(derived.get("available")):
+        return {**base, "status": "OFFLINE", "success": False, "error_message": "Base tratada ainda não publicada.", "incident_kind": "BASE INDISPONÍVEL"}
+
+    registered = derived.get("source_versions") or {}
+    stale = []
+    for row in sources:
+        key = str(row.get("source_key") or "")
+        current = int(row.get("version") or 0)
+        try:
+            used = int(registered.get(key) or 0)
+        except Exception:
+            used = 0
+        if current != used:
+            stale.append(f"{key}: atual v{current} / base v{used}")
+
+    warning_latency = max(1, int(api.get("warning_latency_ms") or 1800))
+    if stale:
+        return {
+            **base,
+            "status": "ATENÇÃO",
+            "success": True,
+            "error_message": "Base desatualizada · " + " · ".join(stale),
+            "incident_kind": "DADOS DESATUALIZADOS",
+            "integration_meta": {
+                "derived_key": derived.get("base_key"),
+                "source_versions": registered,
+                "stale_sources": stale,
+            },
+        }
+    return {
+        **base,
+        "status": "ATENÇÃO" if latency >= warning_latency else "ONLINE",
+        "success": True,
+        "error_message": "",
+        "incident_kind": "LATÊNCIA" if latency >= warning_latency else "",
+        "integration_meta": {
+            "derived_key": derived.get("base_key"),
+            "source_versions": registered,
+        },
+    }
+
+
+def _central_consumer_sync_status(response: requests.Response, latency: float, api: dict) -> dict:
+    base = _central_action_status(response, latency, api)
+    if not base["success"]:
+        return base
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    rows = payload.get("data") if isinstance(payload, dict) else []
+    rows = [row for row in (rows or []) if isinstance(row, dict)]
+    expected = [str(x) for x in (api.get("expected_source_keys") or [])]
+    by_key = {str(row.get("source_key") or ""): row for row in rows}
+    missing = [key for key in expected if key not in by_key]
+    failed = [
+        key for key in expected
+        if key in by_key and str(by_key[key].get("status") or "").upper() not in {"ATUALIZADO", "OK", "ONLINE"}
+    ]
+    if missing:
+        return {**base, "status": "ATENÇÃO", "success": False, "error_message": "Sincronização ausente: " + ", ".join(missing), "incident_kind": "SINCRONIZAÇÃO"}
+    if failed:
+        details = []
+        for key in failed:
+            row = by_key[key]
+            details.append(f"{key}: {row.get('status') or 'SEM STATUS'}")
+        return {**base, "status": "OFFLINE", "success": False, "error_message": "Falha de sincronização · " + " · ".join(details), "incident_kind": "SINCRONIZAÇÃO"}
+    warning_latency = max(1, int(api.get("warning_latency_ms") or 1800))
+    return {
+        **base,
+        "status": "ATENÇÃO" if latency >= warning_latency else "ONLINE",
+        "success": True,
+        "error_message": "",
+        "incident_kind": "LATÊNCIA" if latency >= warning_latency else "",
+        "integration_meta": {
+            "expected_sources": expected,
+            "synced_sources": list(by_key.keys()),
+            "rows_count": sum(int((by_key.get(k) or {}).get("rows_count") or 0) for k in expected),
+        },
+    }
+
+
 def _central_derived_download_status(
     response: requests.Response,
     start: float,
@@ -245,6 +342,12 @@ def check_api(api: dict) -> dict:
         if health_mode == "CENTRAL_ACTION":
             result = _central_action_status(response, latency, api)
             return {"checked_at": checked_at, **result}
+        if health_mode == "CENTRAL_PIPELINE_STATE":
+            result = _central_pipeline_state_status(response, latency, api)
+            return {"checked_at": checked_at, **result}
+        if health_mode == "CENTRAL_CONSUMER_SYNC":
+            result = _central_consumer_sync_status(response, latency, api)
+            return {"checked_at": checked_at, **result}
         if health_mode == "CENTRAL_DERIVED_DOWNLOAD":
             result = _central_derived_download_status(response, start, api)
             return {"checked_at": checked_at, **result}
@@ -306,18 +409,22 @@ def run_check(api: dict) -> dict:
         runtime["last_success_at"] = result["checked_at"]
         store.resolve_incidents(api_id)
         if result["status"] == "ATENÇÃO":
+            kind = str(result.get("incident_kind") or "LATÊNCIA")
+            message = str(result.get("error_message") or "").strip()
+            if not message:
+                message = f"Latência elevada: {result.get('latency_ms')} ms."
             store.open_incident(
                 api_id,
                 str(api.get("name") or "API"),
-                "LATÊNCIA",
-                f"Latência elevada: {result.get('latency_ms')} ms.",
+                kind,
+                message,
             )
     else:
         runtime["last_failure_at"] = result["checked_at"]
         store.open_incident(
             api_id,
             str(api.get("name") or "API"),
-            "INDISPONIBILIDADE",
+            str(result.get("incident_kind") or "INDISPONIBILIDADE"),
             result.get("error_message") or "Falha de comunicação.",
         )
 
