@@ -1,6 +1,8 @@
 name: Backfill normalized sources
 
 on:
+  schedule:
+    - cron: "*/5 * * * *"
   push:
     paths:
       - ".github/workflows/backfill-normalized-sources.yml"
@@ -11,6 +13,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: setta-normalized-source-worker
+  cancel-in-progress: false
 
 jobs:
   normalize:
