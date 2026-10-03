@@ -1166,7 +1166,15 @@ def list_sources() -> list[dict]:
 
 
 def list_derived_bases() -> list[dict]:
+    """Retorna bases derivadas com status por consistência de dependências.
+
+    Uma base continua ATUALIZADA se as versões que a geraram ainda são as
+    versões correntes das fontes. Não é necessário reprocessar só porque
+    virou o dia quando nenhuma dependência mudou.
+    """
     rows_by_key: dict[str, dict] = {}
+    source_versions: dict[str, int] = {}
+
     try:
         rows = central_api_call(
             "derived_status",
@@ -1181,16 +1189,80 @@ def list_derived_bases() -> list[dict]:
     except Exception:
         rows_by_key = {}
 
+    try:
+        source_rows = central_api_call(
+            "source_status",
+            {"keys": [item["key"] for item in SOURCE_CATALOG]},
+            timeout=30,
+        ).get("data") or []
+        source_versions = {
+            str(row.get("source_key")): int(row.get("version") or 0)
+            for row in source_rows
+            if isinstance(row, dict)
+        }
+    except Exception:
+        source_versions = {}
+
+    def same_source_versions(row: dict, expected_keys: list[str]) -> bool:
+        used = row.get("source_versions") or {}
+        if not isinstance(used, dict):
+            return False
+        for key in expected_keys:
+            try:
+                if int(used.get(key) or 0) != int(source_versions.get(key) or 0):
+                    return False
+            except Exception:
+                return False
+        return True
+
     result = []
     for base in DERIVED_CATALOG:
         row = rows_by_key.get(base["key"], {})
         processed_at = row.get("processed_at")
-        processed_dt = parse_dt(processed_at)
+
+        if base["key"] == "relatorio_geral_tratado":
+            current = same_source_versions(
+                row,
+                ["relatorio_geral", "for001", "for022"],
+            )
+        elif base["key"] == "estoque_tratado":
+            current = same_source_versions(
+                row,
+                ["analitico", "endereco"],
+            )
+        elif base["key"] == "compras_tratado":
+            current = same_source_versions(
+                row,
+                ["sc", "pc", "pre_nota"],
+            )
+        elif base["key"] == "tctp_tratado":
+            current = same_source_versions(
+                row,
+                ["pmp", "h001"],
+            )
+        elif base["key"] == "relatorio_mrp":
+            used = row.get("source_versions") or {}
+            cad_ok = str(used.get("cadastros") or "") == f"v{int(source_versions.get('cadastros') or 0)}"
+            derived_ok = True
+            for dep_key in [
+                "relatorio_geral_tratado",
+                "estoque_tratado",
+                "compras_tratado",
+                "tctp_tratado",
+            ]:
+                dep = rows_by_key.get(dep_key, {})
+                dep_processed = str(dep.get("processed_at") or "")
+                if str(used.get(dep_key) or "") != dep_processed:
+                    derived_ok = False
+                    break
+            current = cad_ok and derived_ok
+        else:
+            # MATERIAIS é integração por API e não usa setta_derived_bases.
+            current = bool(row.get("available"))
+
         if not bool(row.get("available")):
             operational_status = "AGUARDANDO"
-        elif processed_dt is None:
-            operational_status = "PENDENTE"
-        elif processed_dt.date() < datetime.now(TZ).date():
+        elif not current:
             operational_status = "DESATUALIZADO"
         else:
             operational_status = "ATUALIZADO"
