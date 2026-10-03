@@ -529,7 +529,15 @@ def render_database() -> None:
 
     for base in derived:
         if base.get("key") == "materiais_api" and system_status:
-            api_status = str(system_status[0].get("status") or "SEM DADOS").upper()
+            api_row = next(
+                (
+                    item for item in system_status
+                    if str(item.get("id") or "")
+                    == "11111111-1111-4111-8111-111111111106"
+                ),
+                {},
+            )
+            api_status = str(api_row.get("status") or "SEM DADOS").upper()
             base["mode"] = f"API {api_status}"
 
     kpi_grid(
