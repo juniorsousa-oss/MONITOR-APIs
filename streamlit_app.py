@@ -517,7 +517,7 @@ def render_database() -> None:
     updated = sum(
         1
         for item in sources
-        if str(item.get("status")).upper() == "ATUALIZADO"
+        if str(item.get("status")).upper() in {"ATUALIZADO", "SEM ALTERAÇÃO"}
     )
 
     system_status = monitor.hydrate_all(store.system_apis())
