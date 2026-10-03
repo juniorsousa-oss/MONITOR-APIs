@@ -1083,6 +1083,7 @@ def list_sources() -> list[dict]:
                 "api_plan": bool(base.get("api_plan")),
                 "status": row.get("status") or "AGUARDANDO",
                 "last_update_at": row.get("last_update_at"),
+                "last_received_at": row.get("last_received_at") or row.get("last_update_at"),
                 "rows_count": row.get("rows_count") or 0,
                 "origin": row.get("origin") or base["source_system"],
                 "last_file_name": row.get("last_file_name") or "",
@@ -1481,6 +1482,17 @@ def save_report(
         "Arquivo bruto salvo e versão atualizada, mas a normalização "
         f"técnica ficou pendente: {normalized_error}"
     ) from normalized_error
+
+
+def touch_source(source_key: str) -> dict:
+    """Registra uma nova conferência do arquivo sem criar nova versão."""
+    return central_api_call(
+        "source_touch",
+        {"source_key": str(source_key)},
+        timeout=30,
+    ).get("data") or {}
+
+
 
 def list_imports(source_key: str | None = None, limit: int = 100) -> list[dict]:
     client = get_client()
