@@ -417,13 +417,21 @@ def source_card(source: dict) -> str:
 
 def derived_card(base: dict) -> str:
     dependencies = " • ".join(base.get("depends_on") or [])
+    status = str(base.get("status") or "AGUARDANDO").upper()
+    status_label = (
+        f"AUTOMÁTICO · {status}"
+        if str(base.get("mode") or "").upper() == "AUTOMÁTICO"
+        else str(base.get("mode") or status)
+    )
     return (
         '<div class="derived-card">'
-        f'<div class="derived-mode">{esc(base.get("mode") or "AUTOMÁTICO")}</div>'
+        f'<div class="derived-mode">{esc(status_label)}</div>'
         f'<div class="derived-name">{esc(base.get("name"))}</div>'
         '<div class="derived-meta">'
         f'Gerado por: <b>{esc(base.get("producer") or "—")}</b><br>'
-        f'Usado por: <b>{esc(base.get("apps") or "—")}</b>'
+        f'Usado por: <b>{esc(base.get("apps") or "—")}</b><br>'
+        f'Última atualização: <b>{esc(base.get("processed_label") or "Nunca")}</b><br>'
+        f'Registros: <b>{esc(base.get("rows_count") or 0)}</b>'
         '</div>'
         f'<div class="derived-deps"><b>Depende de:</b> {esc(dependencies)}</div>'
         '</div>'
