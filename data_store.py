@@ -1038,6 +1038,53 @@ DERIVED_CATALOG = [
 ]
 
 
+
+def source_operational_status(
+    source_row: dict,
+    normalized_row: dict,
+) -> str:
+    """Status diário real da fonte.
+
+    A regra é calendário local (America/Sao_Paulo): ao virar 00:00,
+    uma fonte não conferida no novo dia passa automaticamente para
+    DESATUALIZADO, sem depender de job ou gravação no banco.
+    """
+    raw_status = str(source_row.get("status") or "").strip().upper()
+    normalized_status = str(normalized_row.get("status") or "").strip().upper()
+
+    if raw_status == "ERRO" or normalized_status == "ERRO":
+        return "ERRO"
+
+    if not bool(source_row.get("available")):
+        return "PENDENTE"
+
+    source_version = int(source_row.get("version") or 0)
+    normalized_version = int(normalized_row.get("source_version") or 0)
+    normalized_current = (
+        bool(normalized_row.get("available"))
+        and not bool(normalized_row.get("stale"))
+        and source_version > 0
+        and normalized_version == source_version
+    )
+    if not normalized_current:
+        return "PENDENTE"
+
+    today = datetime.now(TZ).date()
+    received_at = parse_dt(
+        source_row.get("last_received_at")
+        or source_row.get("last_update_at")
+    )
+    if received_at is None or received_at.date() < today:
+        return "DESATUALIZADO"
+
+    content_at = parse_dt(source_row.get("last_update_at"))
+    if content_at is not None and content_at.date() == today:
+        return "ATUALIZADO"
+
+    return "SEM ALTERAÇÃO"
+
+
+
 def list_sources() -> list[dict]:
     keys = [item["key"] for item in SOURCE_CATALOG]
     try:
@@ -1073,6 +1120,18 @@ def list_sources() -> list[dict]:
         row = by_key.get(base["key"], {})
         normalized = normalized_by_key.get(base["key"], {})
         normalized_current = bool(normalized.get("available"))
+        source_payload = {
+            **row,
+            "available": bool(row.get("available")),
+        }
+        normalized_payload = {
+            **normalized,
+            "available": normalized_current,
+        }
+        operational_status = source_operational_status(
+            source_payload,
+            normalized_payload,
+        )
         result.append(
             {
                 "source_key": base["key"],
@@ -1081,7 +1140,8 @@ def list_sources() -> list[dict]:
                 "source_system": base["source_system"],
                 "mode": base["mode"],
                 "api_plan": bool(base.get("api_plan")),
-                "status": row.get("status") or "AGUARDANDO",
+                "status": operational_status,
+                "stored_status": row.get("status") or "AGUARDANDO",
                 "last_update_at": row.get("last_update_at"),
                 "last_received_at": row.get("last_received_at") or row.get("last_update_at"),
                 "rows_count": row.get("rows_count") or 0,
