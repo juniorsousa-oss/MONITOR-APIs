@@ -1184,12 +1184,25 @@ def list_derived_bases() -> list[dict]:
     result = []
     for base in DERIVED_CATALOG:
         row = rows_by_key.get(base["key"], {})
+        processed_at = row.get("processed_at")
+        processed_dt = parse_dt(processed_at)
+        if not bool(row.get("available")):
+            operational_status = "AGUARDANDO"
+        elif processed_dt is None:
+            operational_status = "PENDENTE"
+        elif processed_dt.date() < datetime.now(TZ).date():
+            operational_status = "DESATUALIZADO"
+        else:
+            operational_status = "ATUALIZADO"
+
         result.append(
             {
                 **base,
-                "status": row.get("status") or "AGUARDANDO",
+                "status": operational_status,
+                "stored_status": row.get("status") or "AGUARDANDO",
                 "rows_count": int(row.get("rows_count") or 0),
-                "processed_at": row.get("processed_at"),
+                "processed_at": processed_at,
+                "processed_label": format_dt(processed_at),
                 "available": bool(row.get("available")),
                 "source_versions": row.get("source_versions") or {},
             }
