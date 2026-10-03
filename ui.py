@@ -381,8 +381,12 @@ def source_card(source: dict) -> str:
     accent = (
         "#22c55e"
         if status == "ATUALIZADO"
+        else "#2563eb"
+        if status == "SEM ALTERAÇÃO"
         else "#f59e0b"
-        if status == "ATENÇÃO"
+        if status in {"PENDENTE", "ATENÇÃO"}
+        else "#dc2626"
+        if status == "ERRO"
         else "#64748b"
     )
     api_chip = (
