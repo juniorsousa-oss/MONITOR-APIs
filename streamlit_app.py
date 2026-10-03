@@ -570,6 +570,10 @@ def render_database() -> None:
         {
             **source,
             "last_update_label": store.format_dt(
+                source.get("last_received_at")
+                or source.get("last_update_at")
+            ),
+            "content_update_label": store.format_dt(
                 source.get("last_update_at")
             ),
         }
@@ -697,7 +701,7 @@ def render_database() -> None:
         source_key = source["source_key"]
         st.markdown(
             f"**{source['name']}** · {source['source_system']} · "
-            f"última atualização {store.format_dt(source.get('last_update_at'))}"
+            f"última conferência {store.format_dt(source.get('last_received_at') or source.get('last_update_at'))}"
         )
         uploaded = st.file_uploader(
             f"ARQUIVO — {source['name']}",
@@ -751,10 +755,17 @@ def render_database() -> None:
                 persisted_hash = str(source.get("content_sha256") or "").strip()
                 normalized_current = bool(source.get("normalized_available"))
                 if persisted_hash == fingerprint and normalized_current:
+                    # O conteúdo é idêntico, então não cria nova versão nem
+                    # reprocessa consumidores. Ainda assim registramos que o
+                    # usuário conferiu/enviou novamente a fonte hoje.
+                    try:
+                        store.touch_source(source_key)
+                    except Exception:
+                        pass
                     skipped_names.append(source["name"])
                     done_hashes[source_key] = fingerprint
                     status.write(
-                        f"{source['name']} já está atualizada e normalizada. Pulando..."
+                        f"{source['name']} sem alteração de conteúdo. Conferência registrada."
                     )
                     progress.progress(index / total)
                     continue
