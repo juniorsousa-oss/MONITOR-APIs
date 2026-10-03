@@ -10,6 +10,7 @@ import uuid
 
 import pandas as pd
 import requests
+from openpyxl import load_workbook
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1148,6 +1149,87 @@ def _frame_values(frame: pd.DataFrame) -> list[list[Any]]:
     return json.loads(text)
 
 
+def _trim_workbook_row(values: tuple[Any, ...], max_columns: int = 256) -> list[Any]:
+    """Mantém somente a parte útil da linha e limita used-range artificial."""
+    row = list(values[:max_columns])
+    while row and (
+        row[-1] is None
+        or (isinstance(row[-1], str) and not row[-1].strip())
+    ):
+        row.pop()
+    return row
+
+
+def _read_xlsx_streaming(raw: bytes) -> list[dict[str, Any]]:
+    """Leitura limitada/streaming para relatórios Excel grandes do ERP.
+
+    Evita materializar a área formatada inteira do workbook, causa principal
+    dos travamentos durante a normalização no Streamlit.
+    """
+    workbook = load_workbook(
+        io.BytesIO(raw),
+        read_only=True,
+        data_only=True,
+    )
+    sheets: list[dict[str, Any]] = []
+    try:
+        for index, sheet_name in enumerate(workbook.sheetnames):
+            ws = workbook[sheet_name]
+            rows: list[list[Any]] = []
+            started = False
+            blank_streak = 0
+            max_rows = 250_000
+
+            for row_index, values in enumerate(
+                ws.iter_rows(values_only=True),
+                start=1,
+            ):
+                if row_index > max_rows:
+                    break
+
+                clean = _trim_workbook_row(values)
+                is_blank = not any(
+                    value is not None
+                    and (not isinstance(value, str) or value.strip())
+                    for value in clean
+                )
+
+                if is_blank:
+                    # Preserva linhas iniciais porque alguns relatórios usam
+                    # header=1/header=4. Depois que os dados começaram, uma
+                    # longa sequência vazia encerra a leitura.
+                    if not started:
+                        if row_index <= 50:
+                            rows.append([])
+                        continue
+                    blank_streak += 1
+                    if blank_streak >= 150:
+                        break
+                    rows.append([])
+                    continue
+
+                started = True
+                blank_streak = 0
+                rows.append(clean)
+
+            # Remove vazios apenas do fim; nunca do início.
+            while rows and not rows[-1]:
+                rows.pop()
+
+            sheets.append(
+                {
+                    "index": index,
+                    "name": str(sheet_name),
+                    "rows": rows,
+                    "row_count": int(len(rows)),
+                    "column_count": int(max((len(row) for row in rows), default=0)),
+                }
+            )
+    finally:
+        workbook.close()
+    return sheets
+
+
 def build_normalized_source(
     source_key: str,
     file_name: str,
@@ -1156,14 +1238,16 @@ def build_normalized_source(
     """Converte a fonte uma única vez para o pacote técnico SETTA_SOURCE_V1.
 
     O Excel original continua no Storage para auditoria. Os consumidores
-    devem usar o pacote normalizado e só recorrer ao bruto como contingência.
+    usam a representação técnica e só recorrem ao bruto como contingência.
     """
     suffix = Path(str(file_name or "").lower()).suffix
     sheets: list[dict[str, Any]] = []
 
-    if suffix in {".xlsx", ".xlsm", ".xltx", ".xls"}:
-        engine = "xlrd" if suffix == ".xls" else "openpyxl"
-        book = pd.ExcelFile(io.BytesIO(raw), engine=engine)
+    if suffix in {".xlsx", ".xlsm", ".xltx"}:
+        sheets = _read_xlsx_streaming(raw)
+
+    elif suffix == ".xls":
+        book = pd.ExcelFile(io.BytesIO(raw), engine="xlrd")
         for index, sheet_name in enumerate(book.sheet_names):
             frame = pd.read_excel(
                 book,
@@ -1180,6 +1264,7 @@ def build_normalized_source(
                     "column_count": int(frame.shape[1]),
                 }
             )
+
     elif suffix == ".csv":
         frame = None
         last_error: Exception | None = None
@@ -1221,9 +1306,11 @@ def build_normalized_source(
         payload,
         ensure_ascii=False,
         separators=(",", ":"),
+        default=str,
     ).encode("utf-8")
     normalized = gzip.compress(encoded, compresslevel=6)
     return normalized, sum(int(sheet["row_count"]) for sheet in sheets)
+
 
 
 def _publish_normalized_source(
@@ -1305,27 +1392,17 @@ def save_report(
     origin: str = "UPLOAD",
     max_attempts: int = 3,
 ) -> dict:
-    """Publica bruto + representação técnica normalizada na mesma carga.
+    """Publica o bruto primeiro e normaliza depois.
 
-    O arquivo tabular é interpretado somente no ponto de entrada. O original
-    fica preservado para auditoria/contingência; consumidores usam
-    SETTA_SOURCE_V1.
+    Isso evita que uma planilha grande bloqueie a atualização da fonte antes
+    de o arquivo original ser salvo. Se a normalização falhar, o bruto fica
+    registrado e uma nova tentativa faz apenas o backfill técnico.
     """
-    normalized, normalized_rows = build_normalized_source(
-        source_key,
-        file_name,
-        raw,
-    )
-    if not normalized:
-        raise ValueError(
-            f"A fonte {source_key} precisa ser tabular para entrar na Central normalizada."
-        )
-
     attempts = max(1, int(max_attempts or 1))
     last_error: Exception | None = None
     committed: dict[str, Any] | None = None
 
-    # 1) Publica o bruto e registra uma única nova versão.
+    # 1) Salva imediatamente o original e registra a nova versão.
     for attempt in range(1, attempts + 1):
         try:
             prepared = central_api_call(
@@ -1351,7 +1428,7 @@ def save_report(
                 {
                     "source_key": source_key,
                     "file_name": file_name,
-                    "rows_count": int(rows_count or normalized_rows),
+                    "rows_count": int(rows_count),
                     "mime_type": "application/octet-stream",
                     "content_sha256": content_sha256,
                 },
@@ -1368,7 +1445,23 @@ def save_report(
             f"Falha ao publicar {source_key} após {attempts} tentativa(s): {last_error}"
         ) from last_error
 
-    # 2) Publica a representação técnica vinculada exatamente à versão acima.
+    # 2) Converte uma única vez usando leitura streaming/limitada.
+    try:
+        normalized, normalized_rows = build_normalized_source(
+            source_key,
+            file_name,
+            raw,
+        )
+        if not normalized:
+            raise ValueError(
+                f"A fonte {source_key} precisa ser tabular para entrar na Central normalizada."
+            )
+    except Exception as exc:
+        raise RuntimeError(
+            "Arquivo bruto salvo e versão atualizada, mas a normalização "
+            f"técnica não foi concluída: {exc}"
+        ) from exc
+
     normalized_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
@@ -1385,10 +1478,9 @@ def save_report(
                 time.sleep(1.5 * attempt)
 
     raise RuntimeError(
-        "Arquivo bruto salvo, mas a normalização técnica ficou pendente: "
-        f"{normalized_error}"
+        "Arquivo bruto salvo e versão atualizada, mas a normalização "
+        f"técnica ficou pendente: {normalized_error}"
     ) from normalized_error
-
 
 def list_imports(source_key: str | None = None, limit: int = 100) -> list[dict]:
     client = get_client()
