@@ -514,6 +514,46 @@ def render_database() -> None:
 
     sources = store.list_sources()
     derived = store.list_derived_bases()
+
+    # MATERIAIS é uma carga ativa da Gestão de Entregas, não uma linha
+    # de setta_derived_bases. Complementa o cartão pela integração oficial.
+    try:
+        integration_rows = store.central_api_call(
+            "integration_status",
+            {},
+            timeout=30,
+        ).get("data") or []
+        materials_info = next(
+            (
+                row for row in integration_rows
+                if isinstance(row, dict)
+                and str(row.get("id") or "") == "entregas-nfs"
+            ),
+            {},
+        )
+    except Exception:
+        materials_info = {}
+
+    if materials_info:
+        for base in derived:
+            if base.get("key") != "materiais_api":
+                continue
+            activity = materials_info.get("last_activity_at")
+            activity_dt = store.parse_dt(activity)
+            if activity_dt is None:
+                materials_status = "PENDENTE"
+            elif activity_dt.date() < datetime.now(store.TZ).date():
+                materials_status = "DESATUALIZADO"
+            else:
+                materials_status = "ATUALIZADO"
+            base["status"] = materials_status
+            base["mode"] = f"API {materials_status}"
+            base["processed_at"] = activity
+            base["processed_label"] = store.format_dt(activity)
+            base["rows_count"] = int(materials_info.get("rows_count") or 0)
+            base["available"] = True
+            base["version_label"] = materials_info.get("version_label") or ""
+
     updated = sum(
         1
         for item in sources
