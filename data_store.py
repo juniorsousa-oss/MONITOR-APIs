@@ -978,6 +978,14 @@ SOURCE_CATALOG = [
         "mode": "UPLOAD CENTRAL",
         "api_plan": True,
     },
+    {
+        "key": "movimentacao",
+        "name": "MOVIMENTAÇÃO",
+        "source_system": "PROTHEUS",
+        "apps": "Fechamento Mensal • Gestão de Equipes",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
 ]
 
 DERIVED_CATALOG = [
