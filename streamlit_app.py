@@ -701,6 +701,7 @@ def render_database() -> None:
             "ESTOQUE",
             "COMPRAS",
             "TCTP",
+            "MOVIMENTAÇÃO",
         ],
         horizontal=True,
         key="central_feed_preset",
@@ -711,6 +712,7 @@ def render_database() -> None:
         "ESTOQUE": {"analitico", "endereco"},
         "COMPRAS": {"sc", "pc", "pre_nota"},
         "TCTP": {"pmp", "h001"},
+        "MOVIMENTAÇÃO": {"movimentacao"},
     }
 
     default_labels = []
