@@ -1450,6 +1450,43 @@ def build_normalized_source(
     else:
         return b"", 0
 
+    if str(source_key).strip().lower() == "movimentacao":
+        if not sheets or not (sheets[0].get("rows") or []):
+            raise ValueError("MOVIMENTAÇÃO vazia.")
+
+        header = list((sheets[0].get("rows") or [])[0] or [])
+        if len(header) < 12:
+            raise ValueError(
+                "MOVIMENTAÇÃO fora do padrão: esperado no mínimo A:L, "
+                "com C=TM, J=EMISSAO, K=USUARIO e L=ARMAZEM."
+            )
+
+        def _h(value):
+            text = unicodedata.normalize("NFKD", str(value or ""))
+            text = "".join(ch for ch in text if not unicodedata.combining(ch))
+            return re.sub(r"[^A-Z0-9]+", "", text.upper())
+
+        esperado = {
+            "C": (2, {"TM", "TESA", "TES"}),
+            "J": (9, {"EMISSAO", "DATAEMISSAO"}),
+            "K": (10, {"USUARIO"}),
+            "L": (11, {"ARMAZEM", "ARMZ"}),
+        }
+        erros = []
+        for letra, (idx, aceitos) in esperado.items():
+            recebido = _h(header[idx] if idx < len(header) else "")
+            if recebido not in aceitos:
+                erros.append(
+                    f"{letra} esperado {sorted(aceitos)[0]} e veio "
+                    f"'{header[idx] if idx < len(header) else ''}'"
+                )
+
+        if erros:
+            raise ValueError(
+                "MOVIMENTAÇÃO incompatível com o relatório padrão do Protheus: "
+                + "; ".join(erros)
+            )
+
     payload = {
         "format": "SETTA_SOURCE_V1",
         "source_key": str(source_key),
@@ -1556,6 +1593,20 @@ def save_report(
     last_error: Exception | None = None
     committed: dict[str, Any] | None = None
 
+    # MOVIMENTAÇÃO possui layout operacional fixo. Valida antes de substituir
+    # a fonte corrente para impedir que um relatório tratado/incompatível
+    # sobrescreva o relatório padrão usado pelos indicadores.
+    pre_normalized: bytes | None = None
+    pre_normalized_rows = 0
+    if str(source_key).strip().lower() == "movimentacao":
+        pre_normalized, pre_normalized_rows = build_normalized_source(
+            source_key,
+            file_name,
+            raw,
+        )
+        if not pre_normalized:
+            raise ValueError("MOVIMENTAÇÃO não pôde ser normalizada.")
+
     # 1) Salva imediatamente o original e registra a nova versão.
     for attempt in range(1, attempts + 1):
         try:
@@ -1601,11 +1652,14 @@ def save_report(
 
     # 2) Converte uma única vez usando leitura streaming/limitada.
     try:
-        normalized, normalized_rows = build_normalized_source(
-            source_key,
-            file_name,
-            raw,
-        )
+        if pre_normalized is not None:
+            normalized, normalized_rows = pre_normalized, pre_normalized_rows
+        else:
+            normalized, normalized_rows = build_normalized_source(
+                source_key,
+                file_name,
+                raw,
+            )
         if not normalized:
             raise ValueError(
                 f"A fonte {source_key} precisa ser tabular para entrar na Central normalizada."
