@@ -5,13 +5,17 @@ import hashlib
 import io
 import json
 import os
+import posixpath
+import re
 import time
 import uuid
 import zipfile
+import xml.etree.ElementTree as ET
 
 import pandas as pd
 import requests
 from openpyxl import load_workbook
+from openpyxl.styles.numbers import BUILTIN_FORMATS, is_date_format
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1323,8 +1327,6 @@ def _strip_invalid_conditional_formatting(raw: bytes) -> bytes:
     dos valores das células, portanto essas regras podem ser descartadas
     na cópia usada exclusivamente durante a normalização.
     """
-    import re
-
     source = io.BytesIO(raw)
     target = io.BytesIO()
 
@@ -1370,13 +1372,310 @@ def _load_workbook_streaming(raw: bytes):
         )
 
 
+def _xlsx_column_index(cell_ref: str) -> int:
+    letters = re.match(r"([A-Za-z]+)", str(cell_ref or ""))
+    if not letters:
+        return 0
+    value = 0
+    for char in letters.group(1).upper():
+        value = value * 26 + (ord(char) - 64)
+    return value
+
+
+def _xlsx_shared_strings(archive: zipfile.ZipFile) -> list[str]:
+    path = "xl/sharedStrings.xml"
+    if path not in archive.namelist():
+        return []
+
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    root = ET.fromstring(archive.read(path))
+    values: list[str] = []
+    for item in root.findall(f"{ns}si"):
+        values.append(
+            "".join(
+                node.text or ""
+                for node in item.iter(f"{ns}t")
+            )
+        )
+    return values
+
+
+def _xlsx_date_styles(archive: zipfile.ZipFile) -> set[int]:
+    path = "xl/styles.xml"
+    if path not in archive.namelist():
+        return set()
+
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    root = ET.fromstring(archive.read(path))
+
+    custom_formats: dict[int, str] = {}
+    num_fmts = root.find(f"{ns}numFmts")
+    if num_fmts is not None:
+        for item in num_fmts.findall(f"{ns}numFmt"):
+            try:
+                custom_formats[int(item.attrib.get("numFmtId", "0"))] = str(
+                    item.attrib.get("formatCode") or ""
+                )
+            except Exception:
+                continue
+
+    date_styles: set[int] = set()
+    cell_xfs = root.find(f"{ns}cellXfs")
+    if cell_xfs is None:
+        return date_styles
+
+    for index, xf in enumerate(cell_xfs.findall(f"{ns}xf")):
+        try:
+            num_fmt_id = int(xf.attrib.get("numFmtId", "0"))
+        except Exception:
+            num_fmt_id = 0
+        format_code = custom_formats.get(
+            num_fmt_id,
+            BUILTIN_FORMATS.get(num_fmt_id, ""),
+        )
+        try:
+            if format_code and is_date_format(format_code):
+                date_styles.add(index)
+        except Exception:
+            continue
+    return date_styles
+
+
+def _xlsx_workbook_manifest(
+    archive: zipfile.ZipFile,
+) -> tuple[list[tuple[str, str]], bool]:
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    rel_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+    rid_attr = (
+        "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+    )
+
+    root = ET.fromstring(archive.read("xl/workbook.xml"))
+    workbook_pr = root.find(f"{ns}workbookPr")
+    date1904 = bool(
+        workbook_pr is not None
+        and str(workbook_pr.attrib.get("date1904") or "").lower()
+        in {"1", "true"}
+    )
+
+    rels_root = ET.fromstring(
+        archive.read("xl/_rels/workbook.xml.rels")
+    )
+    relationships: dict[str, str] = {}
+    for rel in rels_root.findall(f"{rel_ns}Relationship"):
+        rel_id = str(rel.attrib.get("Id") or "")
+        target = str(rel.attrib.get("Target") or "")
+        if not rel_id or not target:
+            continue
+        target = target.lstrip("/")
+        if not target.startswith("xl/"):
+            target = posixpath.normpath(posixpath.join("xl", target))
+        relationships[rel_id] = target
+
+    output: list[tuple[str, str]] = []
+    sheets = root.find(f"{ns}sheets")
+    if sheets is None:
+        return output, date1904
+
+    for sheet in sheets.findall(f"{ns}sheet"):
+        name = str(sheet.attrib.get("name") or "Planilha")
+        rel_id = str(sheet.attrib.get(rid_attr) or "")
+        path = relationships.get(rel_id)
+        if path and path in archive.namelist():
+            output.append((name, path))
+    return output, date1904
+
+
+def _xlsx_direct_value(
+    cell: ET.Element,
+    shared_strings: list[str],
+    date_styles: set[int],
+    date1904: bool,
+) -> Any:
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    cell_type = str(cell.attrib.get("t") or "")
+    try:
+        style_index = int(cell.attrib.get("s", "0"))
+    except Exception:
+        style_index = 0
+
+    if cell_type == "inlineStr":
+        inline = cell.find(f"{ns}is")
+        if inline is None:
+            return None
+        return "".join(
+            node.text or ""
+            for node in inline.iter(f"{ns}t")
+        )
+
+    value_node = cell.find(f"{ns}v")
+    if value_node is None or value_node.text is None:
+        return None
+    raw_value = value_node.text
+
+    if cell_type == "s":
+        try:
+            return shared_strings[int(raw_value)]
+        except Exception:
+            return raw_value
+    if cell_type in {"str", "e"}:
+        return raw_value
+    if cell_type == "b":
+        return raw_value == "1"
+    if cell_type == "d":
+        try:
+            return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+        except Exception:
+            return raw_value
+
+    try:
+        number = float(raw_value)
+    except Exception:
+        return raw_value
+
+    if style_index in date_styles:
+        base = datetime(1904, 1, 1) if date1904 else datetime(1899, 12, 30)
+        try:
+            return base + timedelta(days=number)
+        except Exception:
+            pass
+
+    if number.is_integer():
+        return int(number)
+    return number
+
+
+def _read_xlsx_direct(raw: bytes) -> list[dict[str, Any]]:
+    """Fallback XML puro para XLSX/XLT(X) incompatível com openpyxl.
+
+    Lê apenas os valores armazenados no pacote Office Open XML e, portanto,
+    ignora integralmente formatações, validações e objetos visuais que podem
+    conter intervalos inválidos. Fórmulas usam o valor em cache do próprio
+    arquivo, equivalente ao comportamento data_only=True.
+    """
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    sheets: list[dict[str, Any]] = []
+
+    with zipfile.ZipFile(io.BytesIO(raw), "r") as archive:
+        shared_strings = _xlsx_shared_strings(archive)
+        date_styles = _xlsx_date_styles(archive)
+        manifest, date1904 = _xlsx_workbook_manifest(archive)
+
+        for index, (sheet_name, sheet_path) in enumerate(manifest):
+            rows: list[list[Any]] = []
+            started = False
+            blank_streak = 0
+            last_row_number = 0
+            max_rows = 250_000
+            stop_sheet = False
+
+            stream = io.BytesIO(archive.read(sheet_path))
+            for _, element in ET.iterparse(stream, events=("end",)):
+                if element.tag != f"{ns}row":
+                    continue
+
+                try:
+                    row_number = int(
+                        element.attrib.get("r") or (last_row_number + 1)
+                    )
+                except Exception:
+                    row_number = last_row_number + 1
+
+                if row_number > max_rows:
+                    element.clear()
+                    break
+
+                gap = max(row_number - last_row_number - 1, 0)
+                if gap:
+                    if started and blank_streak + gap >= 150:
+                        stop_sheet = True
+                    elif started:
+                        rows.extend([[] for _ in range(gap)])
+                        blank_streak += gap
+                    elif row_number <= 51:
+                        rows.extend(
+                            [[] for _ in range(min(gap, 50 - last_row_number))]
+                        )
+
+                if stop_sheet:
+                    element.clear()
+                    break
+
+                row_values: list[Any] = []
+                for cell in element.findall(f"{ns}c"):
+                    column_index = _xlsx_column_index(
+                        str(cell.attrib.get("r") or "")
+                    )
+                    if column_index <= 0 or column_index > 256:
+                        continue
+                    while len(row_values) < column_index:
+                        row_values.append(None)
+                    row_values[column_index - 1] = _xlsx_direct_value(
+                        cell,
+                        shared_strings,
+                        date_styles,
+                        date1904,
+                    )
+
+                clean = _trim_workbook_row(tuple(row_values))
+                is_blank = not any(
+                    value is not None
+                    and (
+                        not isinstance(value, str)
+                        or value.strip()
+                    )
+                    for value in clean
+                )
+
+                if is_blank:
+                    if not started:
+                        if row_number <= 50:
+                            rows.append([])
+                    else:
+                        blank_streak += 1
+                        if blank_streak >= 150:
+                            element.clear()
+                            break
+                        rows.append([])
+                else:
+                    started = True
+                    blank_streak = 0
+                    rows.append(clean)
+
+                last_row_number = row_number
+                element.clear()
+
+            while rows and not rows[-1]:
+                rows.pop()
+
+            sheets.append(
+                {
+                    "index": index,
+                    "name": str(sheet_name),
+                    "rows": rows,
+                    "row_count": int(len(rows)),
+                    "column_count": int(
+                        max((len(row) for row in rows), default=0)
+                    ),
+                }
+            )
+
+    return sheets
+
+
 def _read_xlsx_streaming(raw: bytes) -> list[dict[str, Any]]:
     """Leitura limitada/streaming para relatórios Excel grandes do ERP.
 
     Evita materializar a área formatada inteira do workbook, causa principal
     dos travamentos durante a normalização no Streamlit.
     """
-    workbook = _load_workbook_streaming(raw)
+    try:
+        workbook = _load_workbook_streaming(raw)
+    except Exception as exc:
+        if "MultiCellRange" in str(exc):
+            return _read_xlsx_direct(raw)
+        raise
+
     sheets: list[dict[str, Any]] = []
     try:
         for index, sheet_name in enumerate(workbook.sheetnames):
