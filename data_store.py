@@ -1730,6 +1730,10 @@ def _read_xlsx_streaming(raw: bytes) -> list[dict[str, Any]]:
                     "column_count": int(max((len(row) for row in rows), default=0)),
                 }
             )
+    except Exception as exc:
+        if "MultiCellRange" in str(exc):
+            return _read_xlsx_direct(raw)
+        raise
     finally:
         workbook.close()
     return sheets
