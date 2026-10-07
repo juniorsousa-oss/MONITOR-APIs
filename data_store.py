@@ -7,6 +7,7 @@ import json
 import os
 import time
 import uuid
+import zipfile
 
 import pandas as pd
 import requests
@@ -1314,17 +1315,68 @@ def _trim_workbook_row(values: tuple[Any, ...], max_columns: int = 256) -> list[
     return row
 
 
+def _strip_invalid_conditional_formatting(raw: bytes) -> bytes:
+    """Remove regras visuais de formatação condicional do XLSX/XLT(X).
+
+    Alguns relatórios do ERP trazem referências de formatação condicional
+    inválidas para versões recentes do openpyxl. A Central precisa somente
+    dos valores das células, portanto essas regras podem ser descartadas
+    na cópia usada exclusivamente durante a normalização.
+    """
+    import re
+
+    source = io.BytesIO(raw)
+    target = io.BytesIO()
+
+    with zipfile.ZipFile(source, "r") as zin, zipfile.ZipFile(
+        target,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+    ) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if (
+                info.filename.startswith("xl/worksheets/")
+                and info.filename.endswith(".xml")
+                and b"conditionalFormatting" in data
+            ):
+                data = re.sub(
+                    rb"<(?:[A-Za-z0-9_]+:)?conditionalFormatting\\b[^>]*>.*?</(?:[A-Za-z0-9_]+:)?conditionalFormatting>",
+                    b"",
+                    data,
+                    flags=re.DOTALL,
+                )
+            zout.writestr(info, data)
+
+    return target.getvalue()
+
+
+def _load_workbook_streaming(raw: bytes):
+    """Abre o workbook com contingência para MultiCellRange inválido."""
+    try:
+        return load_workbook(
+            io.BytesIO(raw),
+            read_only=True,
+            data_only=True,
+        )
+    except TypeError as exc:
+        if "MultiCellRange" not in str(exc):
+            raise
+        sanitized = _strip_invalid_conditional_formatting(raw)
+        return load_workbook(
+            io.BytesIO(sanitized),
+            read_only=True,
+            data_only=True,
+        )
+
+
 def _read_xlsx_streaming(raw: bytes) -> list[dict[str, Any]]:
     """Leitura limitada/streaming para relatórios Excel grandes do ERP.
 
     Evita materializar a área formatada inteira do workbook, causa principal
     dos travamentos durante a normalização no Streamlit.
     """
-    workbook = load_workbook(
-        io.BytesIO(raw),
-        read_only=True,
-        data_only=True,
-    )
+    workbook = _load_workbook_streaming(raw)
     sheets: list[dict[str, Any]] = []
     try:
         for index, sheet_name in enumerate(workbook.sheetnames):
