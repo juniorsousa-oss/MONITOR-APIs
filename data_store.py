@@ -1341,7 +1341,7 @@ def _strip_invalid_conditional_formatting(raw: bytes) -> bytes:
                 and b"conditionalFormatting" in data
             ):
                 data = re.sub(
-                    rb"<(?:[A-Za-z0-9_]+:)?conditionalFormatting\\b[^>]*>.*?</(?:[A-Za-z0-9_]+:)?conditionalFormatting>",
+                    rb"<(?:[A-Za-z0-9_]+:)?conditionalFormatting[^>]*>.*?</(?:[A-Za-z0-9_]+:)?conditionalFormatting>",
                     b"",
                     data,
                     flags=re.DOTALL,
