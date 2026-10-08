@@ -556,6 +556,24 @@ def system_apis() -> list[dict]:
             "resource": "nf-materiais-api /status",
             "code_location": "Gestão de Entregas · Controle de NFs",
         },
+        {
+            "id": "11111111-1111-4111-8111-111111111119",
+            "name": "ERP INDUSTRIAL → PMP",
+            "app_name": "Recebimento autenticado do PMP para o TC/TP Tratado",
+            "endpoint": "https://cuixazpxkvniqldmmnth.supabase.co/functions/v1/pmp-ingest/health",
+            "method": "GET",
+            "expected_status": 200,
+            "timeout_seconds": 15,
+            "warning_latency_ms": 1500,
+            "active": True,
+            "secret_ref": "",
+            "system": True,
+            "source_app": "ERP INDUSTRIAL",
+            "target_app": "CENTRAL DE DADOS SETTA",
+            "service": "Supabase Edge Function",
+            "resource": "pmp-ingest /health (token configurado)",
+            "code_location": "Supabase Edge Function · pmp-ingest",
+        },
     ]
 
 
