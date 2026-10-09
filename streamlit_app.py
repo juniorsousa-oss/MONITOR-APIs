@@ -10,6 +10,28 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+
+# Padrão SETTA: tabelas responsivas ao total de registros exibidos nos filtros.
+def _setta_table_height(data, requested=None):
+    try:
+        rows = len(data)
+    except (TypeError, ValueError):
+        return requested
+    limit = requested if isinstance(requested, int) and requested > 0 else 600
+    return min(limit, max(84, 42 + 35 * (min(rows, 100) + 1)))
+
+
+def _setta_dataframe(data, *args, **kwargs):
+    kwargs["height"] = _setta_table_height(data, kwargs.get("height"))
+    return st.dataframe(data, *args, **kwargs)
+
+
+def _setta_data_editor(data, *args, **kwargs):
+    if kwargs.get("num_rows") != "dynamic":
+        kwargs["height"] = _setta_table_height(data, kwargs.get("height"))
+    return st.data_editor(data, *args, **kwargs)
+
+
 from PIL import Image
 from streamlit_autorefresh import st_autorefresh
 
@@ -397,7 +419,7 @@ def render_monitor() -> None:
                         ]
                         if c in history.columns
                     ]
-                    st.dataframe(history[cols], use_container_width=True, hide_index=True)
+                    _setta_dataframe(history[cols], use_container_width=True, hide_index=True)
 
                 if not selected.get("system") and st.button("EXCLUIR API SELECIONADA", type="secondary"):
                     store.delete_api(str(selected.get("id")))
@@ -435,7 +457,7 @@ def render_monitor() -> None:
                 "monitoring": "MONITORAMENTO",
             }
         )
-        st.dataframe(
+        _setta_dataframe(
             coverage,
             use_container_width=True,
             hide_index=True,
