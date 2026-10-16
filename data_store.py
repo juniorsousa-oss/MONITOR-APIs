@@ -964,10 +964,10 @@ SOURCE_CATALOG = [
     {
         "key": "pmp",
         "name": "PMP",
-        "source_system": "OUTRO APP",
+        "source_system": "ERP INDUSTRIAL",
         "apps": "Conversor MRP",
-        "mode": "UPLOAD CENTRAL",
-        "api_plan": True,
+        "mode": "API AUTOMÁTICA",
+        "api_plan": False,
     },
     {
         "key": "h001",
@@ -1163,14 +1163,29 @@ def list_sources() -> list[dict]:
             source_payload,
             normalized_payload,
         )
+        # O PMP chega por evento (gravação no ERP), não por carga diária.
+        # Não marcar como DESATUALIZADO apenas porque não houve OP nova hoje.
+        # O estado da conexão do receptor é monitorado separadamente.
+        pmp_api_active = (
+            base["key"] == "pmp"
+            and str(row.get("origin") or "").upper() == "ERP_INDUSTRIAL_API"
+        )
+        if pmp_api_active and normalized_current and operational_status == "DESATUALIZADO":
+            operational_status = "SEM ALTERAÇÃO"
+
         result.append(
             {
                 "source_key": base["key"],
                 "name": base["name"],
                 "apps": base["apps"],
                 "source_system": base["source_system"],
-                "mode": base["mode"],
+                "mode": (
+                    "API AUTOMÁTICA" if pmp_api_active else
+                    "CONTINGÊNCIA MANUAL" if base["key"] == "pmp" and bool(row.get("available")) else
+                    base["mode"]
+                ),
                 "api_plan": bool(base.get("api_plan")),
+                "api_active": pmp_api_active,
                 "status": operational_status,
                 "stored_status": row.get("status") or "AGUARDANDO",
                 "last_update_at": row.get("last_update_at"),
