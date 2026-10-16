@@ -44,7 +44,7 @@ def _setta_data_editor(data, *args, **kwargs):
     return st.data_editor(data, *args, **kwargs)
 
 
-from PIL import Image
+from PIL import Image, ImageOps, UnidentifiedImageError
 from streamlit_autorefresh import st_autorefresh
 
 import data_store as store
@@ -67,6 +67,31 @@ def browser_icon():
         return image
     except Exception:
         return "📡"
+
+
+def prepare_favicon(raw: bytes) -> bytes:
+    """Normaliza imagens enviadas (ate 10 MB) em favicon PNG transparente, 256x256."""
+    max_upload_bytes = 10 * 1024 * 1024
+    if len(raw) > max_upload_bytes:
+        raise ValueError("O favicon deve ter no máximo 10 MB.")
+
+    try:
+        with Image.open(io.BytesIO(raw)) as source:
+            # Evita consumo excessivo de memória ao decodificar imagens enormes.
+            if source.width * source.height > 40_000_000:
+                raise ValueError("A imagem do favicon tem resolução muito alta.")
+            image = ImageOps.exif_transpose(source).convert("RGBA")
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("Arquivo de favicon inválido. Envie PNG, JPG, WEBP ou ICO.") from exc
+
+    # Mantém proporções e canal alfa. Centralizar evita cortes em logos não quadradas.
+    image = ImageOps.contain(image, (256, 256), method=Image.Resampling.LANCZOS)
+    icon = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    icon.alpha_composite(image, ((256 - image.width) // 2, (256 - image.height) // 2))
+
+    output = io.BytesIO()
+    icon.save(output, format="PNG", optimize=True)
+    return output.getvalue()
 
 
 st.set_page_config(
@@ -927,9 +952,11 @@ def render_database() -> None:
     )
     favicon_file = v2.file_uploader(
         "FAVICON GLOBAL",
-        type=["png", "jpg", "jpeg", "ico"],
+        type=["png", "jpg", "jpeg", "webp", "ico"],
         key="global_favicon_file",
+        help="Até 10 MB. O ícone será otimizado para 256 × 256 px, preservando transparência.",
     )
+    v2.caption("Máximo: 10 MB • PNG, JPG, WEBP ou ICO • Otimização automática")
 
     save_col, reset_col = st.columns(2)
     if save_col.button(
@@ -951,13 +978,9 @@ def render_database() -> None:
                     kwargs["logo_mime"] = logo_file.type or "image/png"
 
                 if favicon_file is not None:
-                    raw_icon = favicon_file.getvalue()
-                    if len(raw_icon) > 1 * 1024 * 1024:
-                        raise ValueError("O favicon deve ter no máximo 1 MB.")
-                    image = Image.open(io.BytesIO(raw_icon))
-                    image.verify()
-                    kwargs["favicon_data"] = base64.b64encode(raw_icon).decode()
-                    kwargs["favicon_mime"] = favicon_file.type or "image/png"
+                    optimized_icon = prepare_favicon(favicon_file.getvalue())
+                    kwargs["favicon_data"] = base64.b64encode(optimized_icon).decode()
+                    kwargs["favicon_mime"] = "image/png"
 
                 store.save_visual_config(**kwargs)
                 st.success("Identidade visual global atualizada.")
