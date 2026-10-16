@@ -390,10 +390,27 @@ def source_card(source: dict) -> str:
         else "#64748b"
     )
     api_chip = (
-        '<span class="source-chip">API PLANEJADA</span>'
+        '<span class="source-chip">API INTEGRADA</span>'
+        if source.get("api_active")
+        else '<span class="source-chip">API PLANEJADA</span>'
         if source.get("api_plan")
         else ""
     )
+    versao = (
+        f' · Versão <b>{int(source.get("version") or 0)}</b>'
+        if source.get("api_active")
+        else ""
+    )
+    api_health = str(source.get("api_health") or "").upper()
+    health_chip = (
+        '<span class="source-chip">RECEPTOR ONLINE</span>'
+        if api_health == "ONLINE"
+        else '<span class="source-chip">RECEPTOR EM ATENÇÃO</span>'
+        if api_health == "ATENÇÃO"
+        else '<span class="source-chip">RECEPTOR OFFLINE</span>'
+        if api_health == "OFFLINE"
+        else ""
+    ) if source.get("api_active") else ""
     return (
         '<div class="source-card" '
         f'style="--source-accent:{accent}">'
@@ -402,13 +419,13 @@ def source_card(source: dict) -> str:
         '<div class="source-meta">'
         f'Última conferência: <b>{esc(source.get("last_update_label") or "Nunca")}</b><br>'
         f'Última mudança: <b>{esc(source.get("content_update_label") or "Nunca")}</b><br>'
-        f'Registros: <b>{esc(source.get("rows_count") or 0)}</b>'
+        f'Registros: <b>{esc(source.get("rows_count") or 0)}</b>{versao}'
         '</div></div>'
         f'<div class="source-badge">{esc(status)}</div></div>'
         '<div class="source-origin">'
         f'<span class="source-chip">{esc(source.get("source_system") or "—")}</span>'
         f'<span class="source-chip">{esc(source.get("mode") or "UPLOAD CENTRAL")}</span>'
-        f'{api_chip}'
+        f'{api_chip}{health_chip}'
         '</div>'
         f'<div class="source-apps"><b>Usado por:</b> {esc(source.get("apps") or "A definir")}</div>'
         '</div>'
