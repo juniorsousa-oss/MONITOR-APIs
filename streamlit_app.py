@@ -620,6 +620,17 @@ def render_database() -> None:
     )
 
     system_status = monitor.hydrate_all(store.system_apis())
+    pmp_receptor = next(
+        (
+            api for api in system_status
+            if str(api.get("id") or "") == "11111111-1111-4111-8111-111111111119"
+        ),
+        {},
+    )
+    for source in sources:
+        if source.get("source_key") == "pmp":
+            source["api_health"] = str(pmp_receptor.get("status") or "").upper()
+
     active_apis = sum(
         1
         for item in system_status
