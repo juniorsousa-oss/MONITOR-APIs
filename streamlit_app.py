@@ -525,10 +525,11 @@ def render_monitor() -> None:
                 ])
                 _setta_dataframe(tabela, use_container_width=True, hide_index=True)
                 d = resultado["comparativo"]
-                a, b, c = st.columns(3)
+                a, b, c, d_col = st.columns(4)
                 a.metric("OP-produtos somente na API", d["somente_api"])
                 b.metric("OP-produtos somente no Excel", d["somente_excel"])
                 c.metric("Quantidades divergentes", d["quantidades_diferentes"])
+                d_col.metric("Solicitações/datas divergentes", d["solicitacoes_por_data_diferentes"])
                 if resultado["iguais_no_criterio_comparado"]:
                     st.success("Os valores e as chaves comparados coincidem. A fonte NÃO foi publicada.")
                 else:
