@@ -104,6 +104,13 @@ class HomologacaoTests(unittest.TestCase):
         self.assertEqual(x["api"]["solicitacoes_divergentes"], 1)
         self.assertFalse(x["iguais_no_criterio_comparado"])
 
+    def test_mesmas_quantidades_com_datas_diferentes_nao_homologa(self):
+        api = [mes(LastRequest="2026-08-12T15:00:00Z")]
+        x = comparar_documentos(api, pack(excel_row(data="11/08/2026")))
+        self.assertEqual(x["comparativo"]["quantidades_diferentes"], 0)
+        self.assertEqual(x["comparativo"]["solicitacoes_por_data_diferentes"], 2)
+        self.assertFalse(x["iguais_no_criterio_comparado"])
+
     def test_datas_utc_no_fuso_brasileiro(self):
         api = [mes(LastRequest="2026-08-12T01:00:00Z")]
         x = comparar_documentos(api, pack(excel_row(data="11/08/2026")))
