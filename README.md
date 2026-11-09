@@ -99,3 +99,29 @@ A API foi informada pelo fornecedor como **Bearer**; o formato da credencial tam
   Antes de habilitar ingestão automática, conferir formato, colunas, chaves,
   datas, volumes e diferenças entre API e último relatório homologado.
 
+
+## Homologação do conteúdo MES (sem substituir a produção)
+
+No Monitor de APIs, a seção **HOMOLOGAÇÃO — RELATÓRIO GERAL VIA API MES**
+permite coletar o JSON integral sob demanda e comparar com a última versão
+normalizada da fonte `relatorio_geral` na Central de Dados. Ela não altera
+nenhum arquivo, fonte, versão, base derivada ou cálculo de aplicativos.
+
+**Controle de acesso adicional obrigatório:**
+`SETTA_MES_GENERAL_REPORT_VALIDATE_PIN` em Streamlit Secrets, com senha
+privada de **pelo menos 12 caracteres**, diferente do Bearer Token. A UI só
+libera a consulta após digitar essa senha. Não incluir o PIN no GitHub.
+
+- O modo de diagnóstico normal do Monitor continua leve (lê só o início da resposta).
+- Na coleta integral há limite de 50 MiB no JSON MES e limites de 55 MiB no
+  pacote comprimido e 180 MiB no conteúdo expandido da Central.
+- O Relatório Geral validado permanece sendo a planilha anterior; a consulta
+  exibe apenas **estatísticas agregadas**, sem números de OP, materiais,
+  descrições, lotes, pessoas, token ou respostas brutas.
+- A comparação utiliza o par OP + Código; a necessidade é contada uma vez
+  por dia de solicitação e o atendimento é somado entre os lotes. Divergências
+  de necessidade no mesmo dia são apontadas.
+- O período temporal retornado pela API **não está homologado**. Uma divergência
+  de total pode representar escopos temporais diferentes, não erro de cálculo.
+- Não habilitar sincronização automática ou substituição da fonte enquanto
+  a comparação real não estiver aprovada.
