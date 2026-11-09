@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import data_store
 import monitor_logic
-from mes_general_report import check_general_report, TOKEN_ENV
+from mes_general_report import check_general_report, TOKEN_ENV, AUTH_SCHEME_ENV
 from zoneinfo import ZoneInfo
 
 
@@ -65,6 +65,31 @@ class MesGeneralReportTests(unittest.TestCase):
         self.assertTrue(options["stream"])
         self.assertFalse(options["allow_redirects"])
         self.assertNotIn("teste-somente-local", str(value))
+
+    def test_basic_pode_ser_configurado_sem_alterar_o_token(self):
+        requester = FakeRequester(FakeResponse())
+        with patch.dict(os.environ, {TOKEN_ENV: "token-ficticio", AUTH_SCHEME_ENV: "Basic"}):
+            result = check_general_report(session=requester)
+        self.assertTrue(result["success"])
+        self.assertEqual(requester.calls[0][1]["headers"]["Authorization"], "Basic token-ficticio")
+        self.assertNotIn("token-ficticio", str(result))
+
+    def test_esquema_invalido_nao_dispara_chamada(self):
+        requester = FakeRequester(FakeResponse())
+        with patch.dict(os.environ, {TOKEN_ENV: "token-ficticio", AUTH_SCHEME_ENV: "Outro"}):
+            result = check_general_report(session=requester)
+        self.assertEqual(result["incident_kind"], "CONFIGURAÇÃO")
+        self.assertEqual(requester.calls, [])
+
+    def test_http_500_nao_expoe_o_conteudo_do_servidor(self):
+        requester = FakeRequester(FakeResponse(status=500, body=b"internal trace, secret info"))
+        with patch.dict(os.environ, {TOKEN_ENV: "token-ficticio", AUTH_SCHEME_ENV: "Bearer"}):
+            result = check_general_report(session=requester)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["http_status"], 500)
+        self.assertIn("erro interno", result["error_message"])
+        self.assertNotIn("internal trace", str(result))
+        self.assertNotIn("token-ficticio", str(result))
 
     def test_redirect_nao_e_seguido(self):
         requester = FakeRequester(FakeResponse(302))
