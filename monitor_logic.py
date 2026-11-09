@@ -388,6 +388,14 @@ def check_api(api: dict) -> dict:
             "error_message": "Endpoint não informado.",
         }
 
+    if str(api.get("health_mode") or "") == "MES_GENERAL_REPORT":
+        from mes_general_report import check_general_report
+        return check_general_report(
+            timeout_seconds=max(5, int(api.get("timeout_seconds") or 25)),
+            warning_latency_ms=max(1, int(api.get("warning_latency_ms") or 2500)),
+            expected_status=int(api.get("expected_status") or 200),
+        )
+
     method = str(api.get("method") or "GET").upper()
     timeout = max(1, int(api.get("timeout_seconds") or 10))
     expected = int(api.get("expected_status") or 200)
@@ -519,6 +527,19 @@ def run_all_checks() -> list[dict]:
     for api in store.list_apis(include_demo=False):
         if not bool(api.get("active", True)):
             continue
+        # GeneralReport pode processar um arquivo mensal grande. Nunca buscar
+        # o relatório a cada minuto como um healthcheck tradicional.
+        if str(api.get("health_mode") or "") == "MES_GENERAL_REPORT":
+            ultimo = str(api.get("last_check_at") or "").strip()
+            if ultimo:
+                try:
+                    instante = datetime.fromisoformat(ultimo.replace("Z", "+00:00"))
+                    if instante.tzinfo is None:
+                        instante = instante.replace(tzinfo=TZ)
+                    if timedelta(0) <= datetime.now(TZ) - instante.astimezone(TZ) < timedelta(minutes=30):
+                        continue
+                except (ValueError, TypeError, OverflowError):
+                    pass
         results.append(run_check(api))
     return results
 

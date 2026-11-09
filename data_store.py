@@ -557,6 +557,27 @@ def system_apis() -> list[dict]:
             "code_location": "Gestão de Entregas · Controle de NFs",
         },
         {
+            "id": "11111111-1111-4111-8111-111111111120",
+            "name": "MES → RELATÓRIO GERAL",
+            "app_name": "API MES GeneralReport · empresa 01, filial 0201",
+            "endpoint": "https://mes.settadigital.com/rest/v1/GeneralReport?Company=01&Branch=0201",
+            "method": "GET",
+            "expected_status": 200,
+            "timeout_seconds": 25,
+            "warning_latency_ms": 2500,
+            # Ativação controlada: não substituir a fonte atual sem
+            # confirmar retorno e sem a credencial do ambiente de execução.
+            "active": os.getenv("SETTA_MES_GENERAL_REPORT_ENABLED", "").strip().lower() in ("1", "true", "yes"),
+            "secret_ref": "SETTA_MES_GENERAL_REPORT_TOKEN",
+            "health_mode": "MES_GENERAL_REPORT",
+            "system": True,
+            "source_app": "MES SETTA",
+            "target_app": "CENTRAL DE DADOS SETTA",
+            "service": "API REST autenticada",
+            "resource": "GeneralReport · Company=01 · Branch=0201",
+            "code_location": "MONITOR-APIs/mes_general_report.py · monitor_logic.py",
+        },
+        {
             "id": "11111111-1111-4111-8111-111111111119",
             "name": "ERP INDUSTRIAL → PMP",
             "app_name": "Recebimento autenticado do PMP para o TC/TP Tratado",
