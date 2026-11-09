@@ -76,11 +76,18 @@ A API foi informada pelo fornecedor como **Bearer**; o formato da credencial tam
 
 - `SETTA_MES_GENERAL_REPORT_TOKEN`: valor do Bearer, apenas no ambiente seguro
   que executa a consulta (não incluir o prefixo `Bearer `).
-- `SETTA_MES_GENERAL_REPORT_AUTH_SCHEME=Bearer`: padrão; pode ser alterado para `Basic` para um teste controlado **se a autenticação correta for confirmada com o fornecedor**. O mesmo token é usado, sem conversões nem prefixo dentro da variável do token.
+- Autenticação **Bearer confirmada** em execução Postman HTTP 200 (aproximadamente 30 segundos). A antiga variável `SETTA_MES_GENERAL_REPORT_AUTH_SCHEME` é ignorada: ela pode ser removida do Streamlit Secrets. A variável do token deve conter somente seu valor, sem o prefixo `Bearer `.
 - `SETTA_MES_GENERAL_REPORT_ENABLED=1`: libera o cadastro ativo do healthcheck.
   Por padrão fica **desativado** enquanto não houver credencial e contrato de dados validados.
 - O teste é leve: só lê o início da resposta, sem baixar nem registrar o
   relatório mensal inteiro; recusa redirecionamentos e respostas HTML.
+- O Postman do fornecedor apresentou HTTP 200 após ~30s. O monitor usa timeout
+  de leitura de até 90s, e alerta de lentidão após 45s; o botão **Reiniciar API**
+  executa somente 1 tentativa para evitar sobrecarga desnecessária.
+- Erros HTTP 500 em ~0,5s (registrados no Streamlit) não se explicam por timeout:
+  a investigação deve comparar a requisição e o ambiente do Streamlit com o
+  Postman. O monitor registra somente status, tipo da resposta e, se existir,
+  identificador seguro de rastreamento; nunca o conteúdo do erro nem o token.
 - O worker Python limita a frequência automática a um teste por 30 minutos
   (consultas manuais são independentes).
 - **Importante:** o monitor agendado pelo Supabase `setta-monitor-worker`
