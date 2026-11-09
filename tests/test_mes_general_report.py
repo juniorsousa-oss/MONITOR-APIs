@@ -103,6 +103,7 @@ class MesGeneralReportTests(unittest.TestCase):
         with patch("mes_general_report.check_general_report", return_value={"status": "ONLINE", "success": True}) as mocked:
             result = monitor_logic.check_api({
                 "id": "teste-mes", "health_mode": "MES_GENERAL_REPORT",
+                "endpoint": "https://mes.settadigital.com/rest/v1/GeneralReport?Company=01&Branch=0201",
                 "timeout_seconds": 25, "warning_latency_ms": 2500,
             })
         self.assertEqual(result["status"], "ONLINE")
