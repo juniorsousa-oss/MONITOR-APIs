@@ -72,11 +72,11 @@ Os dois serviços devem receber as mesmas variáveis do Supabase.
 ## Integração MES GeneralReport (piloto)
 
 A origem fornecida pela SETTA é `GET https://mes.settadigital.com/rest/v1/GeneralReport?Company=01&Branch=0201`.
-A API utiliza **Bearer**. A credencial nunca deve aparecer no GitHub, em logs, na URL
-ou no banco de configurações do monitor.
+A API foi informada pelo fornecedor como **Bearer**; o formato da credencial também pode ser compatível com HTTP Basic, o que ainda precisa ser confirmado. A credencial nunca deve aparecer no GitHub, em logs, na URL ou no banco de configurações do monitor.
 
 - `SETTA_MES_GENERAL_REPORT_TOKEN`: valor do Bearer, apenas no ambiente seguro
   que executa a consulta (não incluir o prefixo `Bearer `).
+- `SETTA_MES_GENERAL_REPORT_AUTH_SCHEME=Bearer`: padrão; pode ser alterado para `Basic` para um teste controlado **se a autenticação correta for confirmada com o fornecedor**. O mesmo token é usado, sem conversões nem prefixo dentro da variável do token.
 - `SETTA_MES_GENERAL_REPORT_ENABLED=1`: libera o cadastro ativo do healthcheck.
   Por padrão fica **desativado** enquanto não houver credencial e contrato de dados validados.
 - O teste é leve: só lê o início da resposta, sem baixar nem registrar o
