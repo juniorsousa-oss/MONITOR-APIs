@@ -563,8 +563,8 @@ def system_apis() -> list[dict]:
             "endpoint": "https://mes.settadigital.com/rest/v1/GeneralReport?Company=01&Branch=0201",
             "method": "GET",
             "expected_status": 200,
-            "timeout_seconds": 25,
-            "warning_latency_ms": 2500,
+            "timeout_seconds": 90,
+            "warning_latency_ms": 45000,
             # Ativação controlada: não substituir a fonte atual sem
             # confirmar retorno e sem a credencial do ambiente de execução.
             "active": os.getenv("SETTA_MES_GENERAL_REPORT_ENABLED", "").strip().lower() in ("1", "true", "yes"),
