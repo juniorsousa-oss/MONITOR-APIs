@@ -109,6 +109,11 @@ class HomologacaoTests(unittest.TestCase):
         x = comparar_documentos(api, pack(excel_row(data="11/08/2026")))
         self.assertTrue(x["iguais_no_criterio_comparado"])
 
+    def test_data_excel_iso_sem_fuso_nao_muda_de_dia(self):
+        api = [mes(LastRequest="2026-08-12T02:30:00")]
+        x = comparar_documentos(api, pack(excel_row(data="12/08/2026")))
+        self.assertTrue(x["iguais_no_criterio_comparado"])
+
     def test_falta_campo_critico_ou_quantidade_negativa(self):
         for dado in ([{"Code": "00000441"}], [mes(AttendedQuantity=-1)]):
             with self.subTest(dado=dado):
@@ -128,7 +133,7 @@ class HomologacaoTests(unittest.TestCase):
         src_central = FakeSession(FakeResponse(current_body))
         with patch.dict(os.environ, {"SETTA_MES_GENERAL_REPORT_TOKEN": "token-ficticio"}), \
              patch("mes_general_report_validation.store.central_api_call",
-                   return_value={"data": {"signed_url": "https://storage.example/normalizado"}}) as central_call:
+                   return_value={"data": {"signed_url": "https://cuixazpxkvniqldmmnth.supabase.co/storage/v1/object/sign/setta-data/test?token=ficticio"}}) as central_call:
             result = coletar_e_comparar(mes_session=src_mes, central_session=src_central)
         self.assertTrue(result["iguais_no_criterio_comparado"])
         self.assertEqual(len(src_mes.calls), 1)
