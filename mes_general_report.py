@@ -14,6 +14,7 @@ import requests
 
 URL = "https://mes.settadigital.com/rest/v1/GeneralReport?Company=01&Branch=0201"
 TOKEN_ENV = "SETTA_MES_GENERAL_REPORT_TOKEN"
+AUTH_SCHEME_ENV = "SETTA_MES_GENERAL_REPORT_AUTH_SCHEME"
 
 
 def check_general_report(timeout_seconds: int = 25, warning_latency_ms: int = 2500,
@@ -33,6 +34,19 @@ def check_general_report(timeout_seconds: int = 25, warning_latency_ms: int = 25
             "incident_kind": "CONFIGURAÇÃO",
         }
 
+    # O fornecedor rotulou a credencial como Bearer, mas o valor entregue
+    # tem formato que também pode corresponder a HTTP Basic. Não adivinhar:
+    # permitir a troca controlada do ESQUEMA sem alterar o segredo.
+    scheme = os.getenv(AUTH_SCHEME_ENV, "Bearer").strip().lower()
+    if scheme not in {"bearer", "basic"}:
+        return {
+            "checked_at": checked, "status": "OFFLINE", "success": False,
+            "http_status": None, "latency_ms": None,
+            "error_message": "Esquema de autenticação MES inválido: use Bearer ou Basic.",
+            "incident_kind": "CONFIGURAÇÃO",
+        }
+    scheme_name = "Bearer" if scheme == "bearer" else "Basic"
+
     requester = session or requests
     start = time.perf_counter()
     response = None
@@ -40,7 +54,7 @@ def check_general_report(timeout_seconds: int = 25, warning_latency_ms: int = 25
         response = requester.get(
             URL,
             headers={
-                "Authorization": f"Bearer {token}",
+                "Authorization": f"{scheme_name} {token}",
                 "Accept": "application/json, text/csv, application/octet-stream, */*",
             },
             timeout=(8, max(8, int(timeout_seconds))),
@@ -57,7 +71,11 @@ def check_general_report(timeout_seconds: int = 25, warning_latency_ms: int = 25
                 "http_status": http, "latency_ms": latency,
                 "error_message": (
                     "Redirecionamento inesperado da API MES."
-                    if 300 <= http < 400 else f"API MES HTTP {http}."
+                    if 300 <= http < 400 else (
+                        "API MES HTTP 500 (erro interno do serviço; conferir "
+                        "autenticação e logs com o responsável pelo MES)."
+                        if http == 500 else f"API MES HTTP {http}."
+                    )
                 ),
                 "incident_kind": "API MES",
             }
