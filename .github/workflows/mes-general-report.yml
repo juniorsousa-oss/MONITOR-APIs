@@ -4,6 +4,7 @@ on:
     branches:
       - main
       - feat/mes-generalreport-api-20261109
+      - fix/mes-generalreport-auth-mode-20261109
     paths:
       - mes_general_report.py
       - monitor_logic.py
