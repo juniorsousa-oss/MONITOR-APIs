@@ -14,6 +14,7 @@ import json
 import math
 import re
 from zoneinfo import ZoneInfo
+from urllib.parse import urlparse
 
 import pandas as pd
 import requests
@@ -78,10 +79,16 @@ def _dia(valor):
         return ts.tz_convert(FUSO).strftime("%Y-%m-%d") if ts.tzinfo else ts.strftime("%Y-%m-%d")
     txt = str(valor).strip()
     if re.match(r"^\d{4}-\d\d-\d\d[T ]", txt):
-        ts = pd.to_datetime(txt, errors="coerce", utc=True)
-        if pd.isna(ts):
-            raise ValueError("Data inválida.")
-        return ts.tz_convert(FUSO).strftime("%Y-%m-%d")
+        # MES declara UTC; Excel pode exportar hora local sem fuso.
+        if re.search(r"(?:Z|[+-]\d{2}:?\d{2})$", txt, re.I):
+            ts = pd.to_datetime(txt, errors="coerce", utc=True)
+            if pd.isna(ts):
+                raise ValueError("Data inválida.")
+            return ts.tz_convert(FUSO).strftime("%Y-%m-%d")
+        try:
+            return datetime.strptime(txt[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Data inválida.") from None
     for formato in ("%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d"):
         try:
             return datetime.strptime(txt[:10], formato).strftime("%Y-%m-%d")
@@ -266,8 +273,13 @@ def coletar_e_comparar(*, mes_session=None, central_session=None):
         "source_normalized_download", {"source_key": "relatorio_geral"}, timeout=35
     ).get("data") or {}
     signed_url = str(meta.get("signed_url") or "").strip()
-    if not signed_url.startswith("https://"):
-        raise ValueError("Central de Dados não forneceu a versão normalizada do Relatório Geral.")
+    parsed = urlparse(signed_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "cuixazpxkvniqldmmnth.supabase.co"
+        or not parsed.path.startswith("/storage/v1/")
+    ):
+        raise ValueError("Central de Dados não forneceu uma URL de Storage autorizada.")
     raw_central = _download_limited(
         signed_url, session=central_session, limit=MAX_CENTRAL_BYTES
     )
