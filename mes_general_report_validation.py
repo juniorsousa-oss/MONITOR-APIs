@@ -199,8 +199,20 @@ def comparar_documentos(api_payload, current_pack):
         | (iguais["Atendida_api"] - iguais["Atendida_atual"]).abs().gt(1e-6)
         | (iguais["Pendência_api"] - iguais["Pendência_atual"]).abs().gt(1e-6)
     ).sum())
+    # Totais por OP-produto podem coincidir mesmo se as solicitações
+    # tiverem datas distintas (mudando a semana de necessidade do MRP).
+    por_data_api = api.groupby(["OP", "Código", "Data"], dropna=False)["Necessária"].first()
+    por_data_atual = atual.groupby(["OP", "Código", "Data"], dropna=False)["Necessária"].first()
+    comparacao_datas = pd.concat(
+        [por_data_api.rename("mes"), por_data_atual.rename("excel")], axis=1
+    )
+    alteracoes_datas = int((
+        comparacao_datas["mes"].isna()
+        | comparacao_datas["excel"].isna()
+        | (comparacao_datas["mes"] - comparacao_datas["excel"]).abs().gt(1e-6)
+    ).sum())
     estrutura_ok = (
-        not novos and not ausentes and not divergencias
+        not novos and not ausentes and not divergencias and not alteracoes_datas
         and api_stats["solicitacoes_divergentes"] == 0
         and current_stats["solicitacoes_divergentes"] == 0
     )
@@ -210,6 +222,7 @@ def comparar_documentos(api_payload, current_pack):
             "somente_api": novos,
             "somente_excel": ausentes,
             "quantidades_diferentes": divergencias,
+            "solicitacoes_por_data_diferentes": alteracoes_datas,
             "chaves_coincidentes": int(len(iguais)),
         },
         # Indicador técnico, não autorização para substituir produção.
