@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
+import os
 import io
 import re
 import zipfile
@@ -461,6 +463,79 @@ def render_monitor() -> None:
                 if not selected.get("system") and st.button("EXCLUIR API SELECIONADA", type="secondary"):
                     store.delete_api(str(selected.get("id")))
                     st.rerun()
+
+    # Homologação controlada: resultado agregado, sem dados brutos, acesso
+    # apenas com um segundo segredo que NÃO é o token do serviço MES.
+    with st.expander("HOMOLOGAÇÃO — RELATÓRIO GERAL VIA API MES", expanded=False):
+        st.caption(
+            "Busca o JSON completo uma única vez, compara com a última fonte "
+            "normalizada Relatório Geral da Central e apresenta apenas indicadores "
+            "agregados. NÃO substitui planilhas, não publica registros e não altera MRP."
+        )
+        chave_esperada = os.getenv("SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", "")
+        if len(chave_esperada) < 12:
+            st.info(
+                "HOMOLOGAÇÃO BLOQUEADA: configure em Streamlit Secrets a variável "
+                "SETTA_MES_GENERAL_REPORT_VALIDATE_PIN com um código privado de "
+                "pelo menos 12 caracteres. Não utilize o token MES como código."
+            )
+        else:
+            digitado = st.text_input(
+                "CÓDIGO PRIVADO DE HOMOLOGAÇÃO", type="password",
+                key="mes_homologacao_pin",
+            )
+            autorizado = hmac.compare_digest(digitado, chave_esperada)
+            if st.button(
+                "COLETAR E COMPARAR COM O RELATÓRIO ATUAL",
+                use_container_width=True, type="primary",
+                disabled=not autorizado, key="mes_homologar_agora",
+            ):
+                from mes_general_report_validation import coletar_e_comparar
+                with st.spinner("Lendo API MES e comparando a versão da Central de Dados..."):
+                    try:
+                        # O retorno contém apenas estatísticas; JSON MES não é
+                        # guardado no session_state, cache, banco ou navegador.
+                        st.session_state["_mes_homologacao_resumo"] = coletar_e_comparar()
+                        st.success("Comparação concluída — nenhuma fonte foi substituída.")
+                    except ValueError as exc:
+                        st.session_state.pop("_mes_homologacao_resumo", None)
+                        st.error(str(exc))
+                    except Exception:
+                        st.session_state.pop("_mes_homologacao_resumo", None)
+                        st.error("Não foi possível concluir a comparação. Verifique a disponibilidade da Central.")
+            resultado = st.session_state.get("_mes_homologacao_resumo")
+            if autorizado and resultado:
+                base_mes = resultado["api"]
+                base_excel = resultado["excel"]
+                indicadores = (
+                    ("Linhas brutas", "linhas"), ("OPs distintas", "ops"),
+                    ("Códigos distintos", "produtos"),
+                    ("Pares OP + código", "op_produto"),
+                    ("Solicitações distintas", "solicitacoes_distintas"),
+                    ("Quantidade necessária", "necessidade"),
+                    ("Quantidade atendida", "atendimento"),
+                    ("Pendência", "pendencia"),
+                    ("Solicitações divergentes", "solicitacoes_divergentes"),
+                )
+                tabela = pd.DataFrame([
+                    {"Indicador": label, "API MES": base_mes[key],
+                     "Relatório atual": base_excel[key],
+                     "Diferença (API − atual)": round(float(base_mes[key]) - float(base_excel[key]), 4)}
+                    for label, key in indicadores
+                ])
+                _setta_dataframe(tabela, use_container_width=True, hide_index=True)
+                d = resultado["comparativo"]
+                a, b, c, d_col = st.columns(4)
+                a.metric("OP-produtos somente na API", d["somente_api"])
+                b.metric("OP-produtos somente no Excel", d["somente_excel"])
+                c.metric("Quantidades divergentes", d["quantidades_diferentes"])
+                d_col.metric("Solicitações/datas divergentes", d["solicitacoes_por_data_diferentes"])
+                if resultado["iguais_no_criterio_comparado"]:
+                    st.success("Os valores e as chaves comparados coincidem. A fonte NÃO foi publicada.")
+                else:
+                    st.warning("Existem divergências: manter o Excel até a investigação e homologação.")
+                st.caption(resultado["criterio"])
+                st.caption(resultado["observacao"])
 
     st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
     section_band(
