@@ -66,20 +66,23 @@ class MesGeneralReportTests(unittest.TestCase):
         self.assertFalse(options["allow_redirects"])
         self.assertNotIn("teste-somente-local", str(value))
 
-    def test_basic_pode_ser_configurado_sem_alterar_o_token(self):
+    def test_esquema_legado_basic_nao_sobrescreve_bearer_confirmado(self):
         requester = FakeRequester(FakeResponse())
         with patch.dict(os.environ, {TOKEN_ENV: "token-ficticio", AUTH_SCHEME_ENV: "Basic"}):
             result = check_general_report(session=requester)
         self.assertTrue(result["success"])
-        self.assertEqual(requester.calls[0][1]["headers"]["Authorization"], "Basic token-ficticio")
+        self.assertEqual(requester.calls[0][1]["headers"]["Authorization"], "Bearer token-ficticio")
+        self.assertEqual(requester.calls[0][1]["headers"]["Accept"], "*/*")
         self.assertNotIn("token-ficticio", str(result))
 
-    def test_esquema_invalido_nao_dispara_chamada(self):
+    def test_tempos_suportam_execucao_de_30_segundos(self):
         requester = FakeRequester(FakeResponse())
-        with patch.dict(os.environ, {TOKEN_ENV: "token-ficticio", AUTH_SCHEME_ENV: "Outro"}):
-            result = check_general_report(session=requester)
-        self.assertEqual(result["incident_kind"], "CONFIGURAÇÃO")
-        self.assertEqual(requester.calls, [])
+        with patch.dict(os.environ, {TOKEN_ENV: "token-ficticio"}):
+            result = check_general_report(timeout_seconds=25, session=requester)
+        self.assertTrue(result["success"])
+        self.assertGreaterEqual(requester.calls[0][1]["timeout"][1], 60)
+        assert len(requester.calls) == 1
+
 
     def test_http_500_nao_expoe_o_conteudo_do_servidor(self):
         requester = FakeRequester(FakeResponse(status=500, body=b"internal trace, secret info"))
@@ -87,9 +90,27 @@ class MesGeneralReportTests(unittest.TestCase):
             result = check_general_report(session=requester)
         self.assertFalse(result["success"])
         self.assertEqual(result["http_status"], 500)
-        self.assertIn("erro interno", result["error_message"])
+        self.assertIn("HTTP 500", result["error_message"])
+        self.assertIn("application/json", result["error_message"])
         self.assertNotIn("internal trace", str(result))
         self.assertNotIn("token-ficticio", str(result))
+
+    def test_http_500_retorna_request_id_somente_quando_seguro(self):
+        response = FakeResponse(status=500)
+        response.headers["X-Request-ID"] = "trace-abc-123"
+        requester = FakeRequester(response)
+        with patch.dict(os.environ, {TOKEN_ENV: "token-ficticio"}):
+            result = check_general_report(session=requester)
+        self.assertEqual(result["http_status"], 500)
+        self.assertIn("trace-abc-123", result["error_message"])
+        self.assertNotIn("token-ficticio", str(result))
+
+    def test_reiniciar_mes_uma_unica_vez(self):
+        api = {"id": "teste-mes", "health_mode": "MES_GENERAL_REPORT"}
+        with patch.object(monitor_logic, "run_check", return_value={"success": False, "status": "OFFLINE"}) as mocked:
+            result = monitor_logic.restart_api(api, attempts=3, pause_seconds=0)
+        self.assertEqual(result["restart_attempts"], 1)
+        mocked.assert_called_once()
 
     def test_redirect_nao_e_seguido(self):
         requester = FakeRequester(FakeResponse(302))
@@ -133,6 +154,8 @@ class MesGeneralReportTests(unittest.TestCase):
             })
         self.assertEqual(result["status"], "ONLINE")
         mocked.assert_called_once()
+        kwargs = mocked.call_args.kwargs
+        self.assertGreaterEqual(kwargs["timeout_seconds"], 60)
 
 
 if __name__ == "__main__":

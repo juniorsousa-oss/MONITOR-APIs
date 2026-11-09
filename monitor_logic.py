@@ -391,8 +391,8 @@ def check_api(api: dict) -> dict:
     if str(api.get("health_mode") or "") == "MES_GENERAL_REPORT":
         from mes_general_report import check_general_report
         return check_general_report(
-            timeout_seconds=max(5, int(api.get("timeout_seconds") or 25)),
-            warning_latency_ms=max(1, int(api.get("warning_latency_ms") or 2500)),
+            timeout_seconds=max(60, int(api.get("timeout_seconds") or 90)),
+            warning_latency_ms=max(1, int(api.get("warning_latency_ms") or 45000)),
             expected_status=int(api.get("expected_status") or 200),
         )
 
@@ -554,6 +554,10 @@ def restart_api(api: dict, attempts: int = 3, pause_seconds: float = 0.8) -> dic
     """
     current = dict(api)
     attempts = max(1, min(int(attempts or 1), 3))
+    # GeneralReport monta um relatório volumoso (~30s na execução normal).
+    # Reiniciar uma única vez evita três consultas pesadas consecutivas.
+    if str(api.get("health_mode") or "") == "MES_GENERAL_REPORT":
+        attempts = 1
     pause_seconds = max(0.0, min(float(pause_seconds or 0.0), 2.0))
 
     for attempt in range(1, attempts + 1):
