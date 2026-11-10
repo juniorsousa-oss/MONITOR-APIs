@@ -167,10 +167,11 @@ def auditar_registros_mes(payload):
                 _codigo(obj["OP"], 11, "OP", indice)
             except ValueError:
                 motivos.add("OP_INVALIDA")
-        try:
-            _dia(obj.get("LastRequest"))
-        except ValueError:
-            motivos.add("DATA_INVALIDA")
+        for campo in ("LastRequest", "SeparationDate", "ConferenceDate"):
+            try:
+                _dia(obj.get(campo))
+            except ValueError:
+                motivos.add("DATA_INVALIDA")
         if motivos:
             for motivo in sorted(motivos):
                 motivos_contagem[motivo] = motivos_contagem.get(motivo, 0) + 1
