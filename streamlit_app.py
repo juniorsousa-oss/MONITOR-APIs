@@ -905,6 +905,86 @@ def render_database() -> None:
         unsafe_allow_html=True,
     )
 
+    # Controle compacto e restrito à fonte Relatório Geral.
+    # A consulta manual só ocorre por clique autorizado. As demais fontes
+    # não são afetadas. A tarefa cron usa executor separado do Streamlit.
+    relatorio_mes = next(
+        (source for source in sources
+         if source.get("source_key") == "relatorio_geral"),
+        {},
+    )
+    with st.container(border=True):
+        col_mes, col_button = st.columns([4, 1], vertical_alignment="center")
+        with col_mes:
+            st.markdown("**RELATÓRIO GERAL · API MES**")
+            st.caption(
+                "Atualização planejada: 07h20 (Brasília), diariamente. "
+                "Ao publicar nova versão, o Conversor MRP a detecta no "
+                "worker periódico e reprocessa os dados tratados."
+            )
+            st.caption(
+                "Origem da fonte atual: "
+                + str(relatorio_mes.get("origin") or "Aguardando primeira carga via API")
+                + " · Última atualização: "
+                + store.format_dt(relatorio_mes.get("last_update_at"))
+            )
+        key_config = os.getenv("SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", "")
+        if len(key_config) < 12:
+            st.caption(
+                "Atualização manual requer o código privado de homologação "
+                "configurado no Streamlit Secrets."
+            )
+        senha = st.text_input(
+            "CÓDIGO PRIVADO · REPROCESSAMENTO MANUAL",
+            type="password",
+            key="mes_reprocessamento_pin",
+            label_visibility="collapsed",
+            placeholder="Código privado para autorizar a atualização",
+        )
+        autorizado = (
+            len(key_config) >= 12
+            and hmac.compare_digest(senha, key_config)
+        )
+        with col_button:
+            rodar = st.button(
+                "ATUALIZAR AGORA",
+                key="mes_atualizar_agora",
+                disabled=not autorizado,
+                use_container_width=True,
+                help="Consultar MES, publicar fonte validada e acionar o reprocessamento periódico",
+            )
+        if rodar:
+            from mes_general_report_sync import sincronizar_relatorio_geral
+            with st.spinner("Consultando o MES e validando a carga do Relatório Geral..."):
+                try:
+                    retorno = sincronizar_relatorio_geral()
+                    if retorno["status"] == "PROTEGER_BASE":
+                        st.error(
+                            "Fonte preservada: anomalias generalizadas detectadas; "
+                            "a Central não foi alterada."
+                        )
+                        for motivo in retorno.get("motivos_protecao") or []:
+                            st.caption(motivo)
+                    elif retorno.get("publicado"):
+                        st.success(
+                            f'Fonte MES atualizada com {retorno["validos"]:,} '
+                            f'registros válidos e {retorno["quarentena"]:,} '
+                            "em quarentena. O Conversor MRP processará a nova "
+                            "versão no próximo ciclo do worker."
+                        )
+                    else:
+                        st.info(
+                            "Consulta concluída. A fonte está sem alteração; "
+                            "nenhuma nova versão foi criada."
+                        )
+                except Exception:
+                    st.error(
+                        "Não foi possível executar a atualização MES. "
+                        "A última versão normalizada permanece disponível. "
+                        "Consulte os registros técnicos do ambiente."
+                    )
+
+
     normalizadas = [
         item for item in sources
         if str(item.get("normalized_storage_path") or "").strip()
