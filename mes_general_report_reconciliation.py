@@ -14,7 +14,7 @@ import pandas as pd
 
 from mes_general_report_validation import (
     _codigo, _dia, _em_branco, _quantidade,
-    auditar_registros_mes, comparar_documentos,
+    auditar_registros_mes, comparar_documentos, avaliar_continuidade_mes,
 )
 
 TITULOS = (
@@ -165,6 +165,9 @@ def comparar_com_quarentena(api_payload: Any, excel_pack: dict, *, referencia: s
         Counter(_assinatura_excecao(x) for x in api_excecoes)
         == Counter(_assinatura_excecao(x) for x in excel_excecoes)
     )
+    politica = avaliar_continuidade_mes(
+        api_auditoria, linhas_referencia=excel_auditoria["total_recebido"],
+    )
 
     # O relatório inteiro pode ter um registro sem código; não perder a análise
     # dos demais, mas também jamais marcá-lo como homologado integralmente.
@@ -173,7 +176,7 @@ def comparar_com_quarentena(api_payload: Any, excel_pack: dict, *, referencia: s
             "homologacao_bloqueada": True, "comparacao_parcial": False,
             "auditoria": api_auditoria, "auditoria_excel": excel_auditoria,
             "excecoes_correspondentes": correspondentes,
-            "referencia": referencia,
+            "referencia": referencia, "politica_continuidade": politica,
             "observacao": "Sem registros válidos suficientes para comparar.",
         }
 
@@ -186,6 +189,7 @@ def comparar_com_quarentena(api_payload: Any, excel_pack: dict, *, referencia: s
     resultado.update({
         "auditoria": api_auditoria,
         "auditoria_excel": excel_auditoria,
+        "politica_continuidade": politica,
         "referencia": referencia,
         "excecoes_correspondentes": correspondentes,
         "comparacao_parcial": incompleto,
@@ -193,8 +197,9 @@ def comparar_com_quarentena(api_payload: Any, excel_pack: dict, *, referencia: s
         "homologacao_bloqueada": incompleto,
         "iguais_no_criterio_comparado": coincidem_restantes and not incompleto,
         "observacao": (
-            "A análise de registros válidos é apenas diagnóstica. "
-            "Documentos sem código permanecem em quarentena e impedem "
+            "Os registros válidos podem ser processados com ressalvas se a "
+            "política de continuidade permitir. Documentos sem código seguem "
+            "em quarentena para correção. A comparação ainda não comprova "
             "homologação integral. Não houve publicação de dados."
             if incompleto else
             "Comparação concluída; não foram encontradas exceções estruturais. "

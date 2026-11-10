@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from mes_general_report_validation import (
     _download_limited, _table_mes, comparar_documentos, coletar_e_comparar,
-    auditar_registros_mes,
+    auditar_registros_mes, avaliar_continuidade_mes,
     MAX_MES_BYTES,
 )
 
@@ -229,6 +229,42 @@ class HomologacaoTests(unittest.TestCase):
         self.assertNotIn("api", result)
         call.assert_not_called()
         self.assertNotIn("23040102007", str(result))
+
+    def test_excecao_isolada_nao_bloqueia_processamento(self):
+        audit = {
+            "total_recebido": 29650, "registros_validos": 29649,
+            "registros_pendentes": 1, "registros_vazios": 0,
+        }
+        politica = avaliar_continuidade_mes(audit, linhas_referencia=29605)
+        self.assertEqual(politica["status"], "PROCESSAR_COM_RESSALVAS")
+        self.assertTrue(politica["pode_processar_validos"])
+        self.assertTrue(politica["requer_correcao"])
+        self.assertEqual(politica["registros_em_quarentena"], 1)
+
+    def test_muitos_erros_bloqueiam_publicacao_em_vez_de_descarte_macico(self):
+        audit = {
+            "total_recebido": 1000, "registros_validos": 700,
+            "registros_pendentes": 300, "registros_vazios": 0,
+        }
+        politica = avaliar_continuidade_mes(audit, linhas_referencia=1000)
+        self.assertEqual(politica["status"], "PROTEGER_BASE")
+        self.assertFalse(politica["pode_processar_validos"])
+
+    def test_resposta_truncada_protege_base_anterior(self):
+        audit = {
+            "total_recebido": 100, "registros_validos": 100,
+            "registros_pendentes": 0, "registros_vazios": 0,
+        }
+        politica = avaliar_continuidade_mes(audit, linhas_referencia=1000)
+        self.assertEqual(politica["status"], "PROTEGER_BASE")
+        self.assertTrue(any("Volume" in m for m in politica["motivos_protecao"]))
+
+    def test_payload_valido_pode_processar(self):
+        politica = avaliar_continuidade_mes({
+            "total_recebido": 100, "registros_validos": 100,
+            "registros_pendentes": 0, "registros_vazios": 0,
+        }, linhas_referencia=100)
+        self.assertEqual(politica["status"], "PROCESSAR")
 
     def test_falta_campo_critico_ou_quantidade_negativa(self):
         for dado in ([{"Code": "00000441"}], [mes(AttendedQuantity=-1)]):

@@ -204,6 +204,55 @@ def auditar_registros_mes(payload):
     return auditoria, registros_validos
 
 
+def avaliar_continuidade_mes(auditoria: dict, *, linhas_referencia: int | None = None,
+                            max_excecoes_pct: float = 0.5,
+                            minimo_da_referencia_pct: float = 80.0) -> dict:
+    """Política operacional: erro isolado não impede processamento do restante.
+
+    Não efetua publicação. Exceções permanecem identificadas para quarentena.
+    Falhas amplas ou resposta aparentemente truncada protegem a base anterior.
+    """
+    total = int(auditoria.get("total_recebido") or 0)
+    validas = int(auditoria.get("registros_validos") or 0)
+    pendentes = int(auditoria.get("registros_pendentes") or 0)
+    vazias = int(auditoria.get("registros_vazios") or 0)
+    pct_excecoes = 100.0 * pendentes / total if total > 0 else 100.0
+    motivos = []
+    if validas == 0:
+        motivos.append("Nenhum material com chave válida foi recebido.")
+    if total <= 0 or validas + pendentes + vazias != total:
+        motivos.append("Contagem de registros inconsistente.")
+    if pct_excecoes > max_excecoes_pct:
+        motivos.append("Percentual de exceções acima do limite operacional.")
+    if linhas_referencia and linhas_referencia > 0:
+        cobertura = 100.0 * total / linhas_referencia
+        if cobertura < minimo_da_referencia_pct:
+            motivos.append("Volume recebido muito inferior à referência (possível resposta incompleta).")
+    else:
+        cobertura = None
+    status = (
+        "PROTEGER_BASE" if motivos
+        else "PROCESSAR_COM_RESSALVAS" if pendentes
+        else "PROCESSAR"
+    )
+    return {
+        "status": status,
+        "pode_processar_validos": not bool(motivos),
+        "requer_correcao": bool(pendentes),
+        "registros_validos": validas,
+        "registros_em_quarentena": pendentes,
+        "registros_vazios": vazias,
+        "percentual_excecoes": round(pct_excecoes, 4),
+        "cobertura_referencia_pct": round(cobertura, 2) if cobertura is not None else None,
+        "motivos_protecao": motivos,
+        "observacao": (
+            "Esta decisão autoriza apenas o processamento de registros válidos "
+            "quando a sincronização for habilitada. Registros inconsistentes "
+            "devem permanecer auditáveis; este painel não publica os dados."
+        ),
+    }
+
+
 def _table_mes(payload):
     registros = _mes_records(payload)
     linhas = []
@@ -454,6 +503,7 @@ def coletar_e_comparar(*, mes_session=None, central_session=None,
         return {
             "homologacao_bloqueada": True,
             "auditoria": auditoria,
+            "politica_continuidade": avaliar_continuidade_mes(auditoria),
             "observacao": "JSON recebido, mas existem registros para conferência no MES. "
                           "Envie o Excel manual atualizado para comparar as linhas válidas "
                           "sem autorizar a substituição da fonte.",
