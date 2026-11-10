@@ -173,9 +173,9 @@ class HomologacaoTests(unittest.TestCase):
         del sem_codigo["Code"]
         raw = json.dumps([mes(), sem_codigo]).encode()
         src = FakeSession(FakeResponse(raw))
-        with patch.dict(os.environ, {"SETTA_MES_GENERAL_REPORT_TOKEN": "fake"}), \\
-             patch("mes_general_report_validation.store.central_api_call") as call:
-            result = coletar_e_comparar(mes_session=src)
+        with patch.dict(os.environ, {"SETTA_MES_GENERAL_REPORT_TOKEN": "fake"}):
+            with patch("mes_general_report_validation.store.central_api_call") as call:
+                result = coletar_e_comparar(mes_session=src)
         self.assertTrue(result["homologacao_bloqueada"])
         self.assertEqual(result["auditoria"]["registros_pendentes"], 1)
         self.assertNotIn("api", result)
