@@ -295,6 +295,62 @@ def comparar_documentos(api_payload, current_pack):
         | (iguais["Atendida_api"] - iguais["Atendida_atual"]).abs().gt(1e-6)
         | (iguais["Pendência_api"] - iguais["Pendência_atual"]).abs().gt(1e-6)
     ).sum())
+
+    # Decompor diferenças entre combinações novas/ausentes e alterações
+    # das combinações que existem em ambas as fontes. Somente contagens
+    # e totais, sem expor OP ou código de materiais no frontend.
+    unicos_api = unidos.loc[
+        unidos["Necessária_api"].notna() & unidos["Necessária_atual"].isna()
+    ]
+    unicos_excel = unidos.loc[
+        unidos["Necessária_api"].isna() & unidos["Necessária_atual"].notna()
+    ]
+    diagnostico_totais = []
+    for indicador, titulo in (
+        ("Necessária", "Quantidade necessária"),
+        ("Atendida", "Quantidade atendida"),
+        ("Pendência", "Pendência"),
+    ):
+        novas = float(unicos_api[f"{indicador}_api"].sum())
+        removidas = -float(unicos_excel[f"{indicador}_atual"].sum())
+        alteradas = float(
+            iguais[f"{indicador}_api"].sum() - iguais[f"{indicador}_atual"].sum()
+        )
+        diagnostico_totais.append({
+            "Indicador": titulo,
+            "Somente na API": round(novas, 4),
+            "Somente no Excel": round(removidas, 4),
+            "Alteração em chaves existentes": round(alteradas, 4),
+            "Diferença total": round(novas + removidas + alteradas, 4),
+        })
+
+    # "LastRequest" marca a data da solicitação, NÃO a data da inclusão
+    # no MES. Distribuição temporal apenas das combinações OP/produto
+    # que aparecem exclusivamente na API.
+    index_api = api.set_index(["OP", "Código"]).index
+    registros_exclusivos = (
+        api.loc[index_api.isin(unicos_api.index), ["OP", "Código", "Data"]]
+        .drop_duplicates()
+    )
+    dias_exclusivos = (
+        registros_exclusivos.groupby("Data", dropna=False)
+        .size().sort_index(ascending=False)
+    )
+    distribuicao_datas = [
+        {"Data da solicitação": data if data else "NÃO INFORMADA",
+         "Solicitações apenas na API": int(quantidade)}
+        for data, quantidade in dias_exclusivos.head(12).items()
+    ]
+    diagnostico = {
+        "diferencas_por_origem": diagnostico_totais,
+        "datas_solicitacoes_apenas_api": distribuicao_datas,
+        "total_datas_distintas_apenas_api": int(len(dias_exclusivos)),
+        "observacao_datas": (
+            "Data da solicitação não comprova quando o registro foi incluído "
+            "ou atualizado no MES. A API e o Excel devem ter o mesmo corte "
+            "de atualização para uma homologação conclusiva."
+        ),
+    }
     # Totais por OP-produto podem coincidir mesmo se as solicitações
     # tiverem datas distintas (mudando a semana de necessidade do MRP).
     por_data_api = api.groupby(["OP", "Código", "Data"], dropna=False)["Necessária"].first()
@@ -314,6 +370,7 @@ def comparar_documentos(api_payload, current_pack):
     )
     return {
         "api": api_stats, "excel": current_stats,
+        "diagnostico_diferencas": diagnostico,
         "comparativo": {
             "somente_api": novos,
             "somente_excel": ausentes,
