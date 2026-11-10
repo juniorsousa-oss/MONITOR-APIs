@@ -108,6 +108,102 @@ def _mes_records(payload):
     return payload
 
 
+
+def _em_branco(valor):
+    return valor is None or (
+        isinstance(valor, str) and valor.strip().lower() in {"", "null", "none", "nan"}
+    )
+
+
+def _registro_realmente_vazio(registro):
+    """Descarta apenas objetos integralmente vazios, nunca demandas sem código."""
+    return all(_em_branco(v) for v in registro.values())
+
+
+def auditar_registros_mes(payload):
+    """Analisa todo o JSON sem expor valores nem interromper na primeira falha.
+
+    Saída pública: somente contagens, presença de informações e posições no
+    array. Nenhuma OP, código, usuário, descrição, lote ou conteúdo bruto.
+    """
+    registros = _mes_records(payload)
+    motivos_contagem = {}
+    exemplos = []
+    registros_validos = []
+    vazios = 0
+    com_movimento_sem_codigo = 0
+    for indice, obj in enumerate(registros, 1):
+        if _registro_realmente_vazio(obj):
+            vazios += 1
+            continue
+        motivos = set()
+        codigo_vazio = _em_branco(obj.get("Code"))
+        op_vazia = _em_branco(obj.get("OP"))
+        if codigo_vazio:
+            motivos.add("CODIGO_AUSENTE")
+        if op_vazia:
+            motivos.add("OP_AUSENTE")
+        quantidades = []
+        for chave in ("NecessaryQuantity", "AttendedQuantity"):
+            if _em_branco(obj.get(chave)):
+                motivos.add("QUANTIDADE_AUSENTE")
+                quantidades.append(None)
+                continue
+            try:
+                quantidades.append(_quantidade(obj[chave], chave, indice))
+            except ValueError:
+                motivos.add("QUANTIDADE_INVALIDA")
+                quantidades.append(None)
+        movimento = any(q is not None and q > 0 for q in quantidades)
+        if codigo_vazio and movimento:
+            com_movimento_sem_codigo += 1
+        if not codigo_vazio:
+            try:
+                _codigo(obj["Code"], 8, "Code", indice)
+            except ValueError:
+                motivos.add("CODIGO_INVALIDO")
+        if not op_vazia:
+            try:
+                _codigo(obj["OP"], 11, "OP", indice)
+            except ValueError:
+                motivos.add("OP_INVALIDA")
+        try:
+            _dia(obj.get("LastRequest"))
+        except ValueError:
+            motivos.add("DATA_INVALIDA")
+        if motivos:
+            for motivo in sorted(motivos):
+                motivos_contagem[motivo] = motivos_contagem.get(motivo, 0) + 1
+            if len(exemplos) < 12:
+                exemplos.append({
+                    "Linha JSON": indice,
+                    "Problemas": ", ".join(sorted(motivos)),
+                    "OP informada": not op_vazia,
+                    "Descrição informada": not _em_branco(obj.get("Description")),
+                    "Lote informado": not _em_branco(obj.get("Batch")),
+                    "Quantidade positiva": movimento,
+                })
+        else:
+            registros_validos.append(obj)
+    pendentes = len(registros) - vazios - len(registros_validos)
+    auditoria = {
+        "total_recebido": len(registros),
+        "registros_validos": len(registros_validos),
+        "registros_vazios": vazios,
+        "registros_pendentes": pendentes,
+        "sem_codigo_com_movimento": com_movimento_sem_codigo,
+        "motivos": motivos_contagem,
+        "exemplos": exemplos,
+        "aprovado_para_comparacao": pendentes == 0 and len(registros_validos) > 0,
+        "observacao": (
+            "Linhas verdadeiramente vazias são ignoradas, com contagem. "
+            "Registros sem código, mesmo sem quantidade, bloqueiam a homologação. "
+            "Nenhuma necessidade é descartada automaticamente."
+        ),
+    }
+    return auditoria, registros_validos
+
+
 def _table_mes(payload):
     registros = _mes_records(payload)
     linhas = []
@@ -280,8 +376,16 @@ def coletar_e_comparar(*, mes_session=None, central_session=None):
         api_payload = json.loads(raw_mes.decode("utf-8-sig"))
     except (ValueError, UnicodeError):
         raise ValueError("MES respondeu HTTP 200, mas o conteúdo não é JSON válido.") from None
-    # Validar a estrutura MES ANTES de tentar qualquer análise comparativa.
-    _table_mes(api_payload)
+    # Inspecionar todas as linhas em vez de interromper na primeira com Code
+    # ausente; ainda não fazemos comparação se houver registro sem identificação.
+    auditoria, registros_validos = auditar_registros_mes(api_payload)
+    if not auditoria["aprovado_para_comparacao"]:
+        return {
+            "homologacao_bloqueada": True,
+            "auditoria": auditoria,
+            "observacao": "JSON recebido, mas existem registros para conferência no MES. "
+                          "A Central e o MRP continuam preservados.",
+        }
     meta = store.central_api_call(
         "source_normalized_download", {"source_key": "relatorio_geral"}, timeout=35
     ).get("data") or {}
@@ -305,4 +409,6 @@ def coletar_e_comparar(*, mes_session=None, central_session=None):
         pack = json.loads(unpacked.decode("utf-8"))
     except (ValueError, OSError, UnicodeError):
         raise ValueError("Não foi possível interpretar a fonte normalizada da Central.") from None
-    return comparar_documentos(api_payload, pack)
+    resultado = comparar_documentos(registros_validos, pack)
+    resultado["auditoria"] = auditoria
+    return resultado
