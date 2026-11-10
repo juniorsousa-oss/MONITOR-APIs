@@ -125,3 +125,22 @@ libera a consulta após digitar essa senha. Não incluir o PIN no GitHub.
   de total pode representar escopos temporais diferentes, não erro de cálculo.
 - Não habilitar sincronização automática ou substituição da fonte enquanto
   a comparação real não estiver aprovada.
+
+## Erros de código de material ausente no JSON MES
+
+Quando a API retorna um registro sem `Code`, a homologação **não deve**
+desconsiderar a linha automaticamente. O Monitor realiza auditoria agregada
+dos registros recebidos e apresenta:
+
+- Total recebido, total válido e quantos registros têm pendências.
+- Contagens por tipo (`CODIGO_AUSENTE`, `OP_AUSENTE`,
+  `QUANTIDADE_INVALIDA`, `DATA_INVALIDA` etc.).
+- Quantidade de registros **sem código e com quantidade positiva**.
+- Até 12 posições do JSON e indicadores de presença (OP, descrição, lote
+  e quantidade positiva), sem exibir os valores desses campos.
+
+Apenas objetos integralmente vazios são contabilizados como vazios e
+ignorados com segurança. **Qualquer registro não vazio sem Code bloqueia
+a comparação com a Central**, inclusive quando traz quantidade zero.
+Nenhum material é inventado, somado a outro ou excluído para homologar.
+Nenhum dado bruto é salvo, e o MRP continua alimentado pela fonte atual.
