@@ -1194,6 +1194,18 @@ def list_sources() -> list[dict]:
         if pmp_api_active and normalized_current and operational_status == "DESATUALIZADO":
             operational_status = "SEM ALTERAÇÃO"
 
+        # A integração é identificada separadamente da publicação de uma
+        # carga automática. Mostrar API INTEGRADA quando o Bearer está
+        # configurado; a origem da última carga consta no nome da fonte.
+        mes_api_integrada = (
+            base["key"] == "relatorio_geral"
+            and bool(os.getenv("SETTA_MES_GENERAL_REPORT_TOKEN", "").strip())
+        )
+        mes_ultima_carga_api = (
+            base["key"] == "relatorio_geral"
+            and str(row.get("last_file_name") or "").startswith("API_MES_")
+        )
+
         result.append(
             {
                 "source_key": base["key"],
@@ -1201,12 +1213,14 @@ def list_sources() -> list[dict]:
                 "apps": base["apps"],
                 "source_system": base["source_system"],
                 "mode": (
+                    "API INTEGRADA" if mes_api_integrada else
                     "API AUTOMÁTICA" if pmp_api_active else
                     "CONTINGÊNCIA MANUAL" if base["key"] == "pmp" and bool(row.get("available")) else
                     base["mode"]
                 ),
                 "api_plan": bool(base.get("api_plan")),
-                "api_active": pmp_api_active,
+                "api_active": pmp_api_active or mes_api_integrada,
+                "last_import_was_api": mes_ultima_carga_api,
                 "status": operational_status,
                 "stored_status": row.get("status") or "AGUARDANDO",
                 "last_update_at": row.get("last_update_at"),
