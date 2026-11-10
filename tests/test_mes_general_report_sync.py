@@ -74,6 +74,14 @@ class IngestaoTests(unittest.TestCase):
         faults = pd.read_excel(BytesIO(out["arquivo"]), sheet_name="Inconsistencias MES")
         self.assertEqual(len(faults), 1)
 
+    def test_data_de_conferencia_invalida_entra_quarentena_sem_travar(self):
+        sample = [registro() for _ in range(200)]
+        sample.append(registro(ConferenceDate="data inválida"))
+        out = preparar_carga_mes(sample, referencia=201)
+        self.assertEqual(out["status"], "PROCESSAR_COM_RESSALVAS")
+        self.assertEqual(out["linhas_excecao"], 1)
+        self.assertEqual(out["linhas_fonte"], 200)
+
     def test_protecao_contra_fonte_aparentemente_truncada(self):
         out = preparar_carga_mes([registro()], referencia=1000)
         self.assertEqual(out["status"], "PROTEGER_BASE")
