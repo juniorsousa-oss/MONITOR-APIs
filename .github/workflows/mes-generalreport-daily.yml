@@ -1,0 +1,35 @@
+name: SETTA MES GeneralReport — atualização 07h20
+on:
+  schedule:
+    # Horário de Brasília (UTC−03): 10:20 UTC = 07:20 BRT.
+    # GitHub Actions pode iniciar com atraso; não há garantia de minuto exato.
+    - cron: '20 10 * * *'
+  workflow_dispatch:
+concurrency:
+  group: setta-mes-generalreport-source
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  update-generalreport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SETTA_MES_GENERAL_REPORT_TOKEN: ${{ secrets.SETTA_MES_GENERAL_REPORT_TOKEN }}
+      SETTA_SUPABASE_ANON_KEY: ${{ secrets.SETTA_SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Confirmar credencial presente sem imprimi-la
+        run: |
+          if [ -z "$SETTA_MES_GENERAL_REPORT_TOKEN" ]; then
+            echo "Configure SETTA_MES_GENERAL_REPORT_TOKEN em GitHub Actions Secrets do repositório."
+            exit 1
+          fi
+      - name: Buscar, validar e publicar Relatório Geral MES
+        run: python mes_general_report_sync.py
