@@ -197,3 +197,28 @@ A finalidade é distinguir variação temporal de diferenças persistentes.
 O próximo teste ideal compara Excel e API com o menor intervalo possível,
 registrando o momento de extração e mantendo a quarentena do material
 sem código. Nenhuma nova fonte é publicada automaticamente.
+
+## Atualização com ressalvas — política operacional
+
+Inconsistências **isoladas de registro** identificadas no JSON MES não devem
+interromper o processamento de materiais válidos. A rotina de homologação
+passa a calcular a política `PROCESSAR`, `PROCESSAR_COM_RESSALVAS` ou
+`PROTEGER_BASE` separadamente da comparação histórica com o Excel.
+
+- `PROCESSAR_COM_RESSALVAS`: registros válidos seguem elegíveis;
+  os inválidos ficam identificados para quarentena e correção.
+- `PROTEGER_BASE`: nenhum material válido, contagens inconsistentes,
+  mais de 0,5% dos registros com inconsistência ou menos de 80% do
+  volume total da referência. É um limite inicial conservador, sujeito
+  a calibração operacional. Mantém-se a última base válida.
+- `PROCESSAR`: recebimento estruturalmente íntegro.
+
+A diferença entre a API corrente e um Excel extraído anteriormente não
+é, isoladamente, erro de material: pode refletir movimentações posteriores.
+A quarentena do Conversor MRP já é publicada separadamente quando sua
+rotina de processamento é acionada.
+
+**Limite importante:** este ajuste prepara a regra de continuidade e
+sinaliza a situação na homologação. O Monitor não envia dados à Central;
+a coleta/persistência automática da API ainda depende de uma etapa de
+integração dedicada e configuração segura do ambiente executor.
