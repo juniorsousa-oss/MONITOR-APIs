@@ -5,6 +5,7 @@ on:
       - main
       - feat/mes-generalreport-api-20261109
       - feat/mes-generalreport-homologacao-20261109
+      - fix/mes-auditoria-codigo-ausente-20261110
       - fix/mes-generalreport-auth-mode-20261109
       - fix/mes-postman-parity-20261109
     paths:

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from mes_general_report_validation import (
     _download_limited, _table_mes, comparar_documentos, coletar_e_comparar,
+    auditar_registros_mes,
     MAX_MES_BYTES,
 )
 
@@ -120,6 +121,66 @@ class HomologacaoTests(unittest.TestCase):
         api = [mes(LastRequest="2026-08-12T02:30:00")]
         x = comparar_documentos(api, pack(excel_row(data="12/08/2026")))
         self.assertTrue(x["iguais_no_criterio_comparado"])
+
+    def test_sem_code_com_demanda_impede_homologacao_sem_perder_registro(self):
+        sem_codigo = mes()
+        del sem_codigo["Code"]
+        auditoria, validos = auditar_registros_mes([
+            mes(), sem_codigo, mes(Code="00000444", AttendedQuantity=0),
+        ])
+        self.assertEqual(auditoria["total_recebido"], 3)
+        self.assertEqual(auditoria["registros_validos"], 2)
+        self.assertEqual(auditoria["registros_pendentes"], 1)
+        self.assertEqual(auditoria["motivos"]["CODIGO_AUSENTE"], 1)
+        self.assertEqual(auditoria["sem_codigo_com_movimento"], 1)
+        self.assertEqual(auditoria["exemplos"][0]["Linha JSON"], 2)
+        self.assertFalse(auditoria["aprovado_para_comparacao"])
+        self.assertEqual(len(validos), 2)
+        self.assertNotIn("23040102007", str(auditoria))
+        self.assertNotIn("MATERIAL DE TESTE", str(auditoria))
+
+    def test_sem_code_sem_movimento_tambem_bloqueia(self):
+        auditoria, _ = auditar_registros_mes([
+            mes(Code=None, NecessaryQuantity=0, AttendedQuantity=0),
+        ])
+        self.assertEqual(auditoria["registros_pendentes"], 1)
+        self.assertEqual(auditoria["sem_codigo_com_movimento"], 0)
+        self.assertFalse(auditoria["aprovado_para_comparacao"])
+
+    def test_objeto_integralmente_vazio_pode_ser_identificado_sem_risco(self):
+        auditoria, validos = auditar_registros_mes([
+            mes(), {}, {"OP": None, "Code": "", "NecessaryQuantity": None},
+        ])
+        self.assertEqual(auditoria["registros_vazios"], 2)
+        self.assertEqual(auditoria["registros_pendentes"], 0)
+        self.assertTrue(auditoria["aprovado_para_comparacao"])
+        self.assertEqual(len(validos), 1)
+
+    def test_varias_inconsistencias_geram_contagem_em_vez_de_primeiro_erro(self):
+        auditoria, _ = auditar_registros_mes([
+            mes(Code=None, AttendedQuantity=1),
+            mes(Code=" ", NecessaryQuantity=-1),
+            mes(OP=None, Code="00000441", AttendedQuantity="texto"),
+        ])
+        self.assertEqual(auditoria["registros_pendentes"], 3)
+        self.assertEqual(auditoria["motivos"]["CODIGO_AUSENTE"], 2)
+        self.assertEqual(auditoria["motivos"]["OP_AUSENTE"], 1)
+        self.assertEqual(auditoria["motivos"]["QUANTIDADE_INVALIDA"], 2)
+        self.assertEqual(auditoria["exemplos"][-1]["Linha JSON"], 3)
+
+    def test_coleta_sem_codigo_retorna_auditoria_sem_acessar_central(self):
+        sem_codigo = mes(AttendedQuantity=1)
+        del sem_codigo["Code"]
+        raw = json.dumps([mes(), sem_codigo]).encode()
+        src = FakeSession(FakeResponse(raw))
+        with patch.dict(os.environ, {"SETTA_MES_GENERAL_REPORT_TOKEN": "fake"}):
+            with patch("mes_general_report_validation.store.central_api_call") as call:
+                result = coletar_e_comparar(mes_session=src)
+        self.assertTrue(result["homologacao_bloqueada"])
+        self.assertEqual(result["auditoria"]["registros_pendentes"], 1)
+        self.assertNotIn("api", result)
+        call.assert_not_called()
+        self.assertNotIn("23040102007", str(result))
 
     def test_falta_campo_critico_ou_quantidade_negativa(self):
         for dado in ([{"Code": "00000441"}], [mes(AttendedQuantity=-1)]):
