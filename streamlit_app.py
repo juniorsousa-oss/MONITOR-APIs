@@ -905,6 +905,67 @@ def render_database() -> None:
         unsafe_allow_html=True,
     )
 
+    # Controle compacto junto aos cartões de fonte, sem levar o usuário
+    # à seção técnica de homologação.
+    mes_fonte = next(
+        (fonte for fonte in sources if fonte.get("source_key") == "relatorio_geral"),
+        {},
+    )
+    col_info, col_action = st.columns([5, 1], vertical_alignment="center")
+    with col_info:
+        ultima_api = bool(mes_fonte.get("last_import_was_api"))
+        st.caption(
+            "RELATÓRIO GERAL · API MES INTEGRADA · coleta automática "
+            "programada para 07h20 (Brasília) · "
+            + (
+                f'última fonte publicada via API em '
+                f'{store.format_dt(mes_fonte.get("last_update_at"))}.'
+                if ultima_api else
+                "fonte atual ainda de origem manual."
+            )
+        )
+    with col_action:
+        with st.popover("↻ Reprocessar", use_container_width=True):
+            st.caption("Buscar a API MES agora e solicitar novo processamento do MRP.")
+            chave_esperada = os.getenv("SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", "")
+            if len(chave_esperada) < 12:
+                st.warning("Configure o PIN privado de homologação no Streamlit Secrets.")
+            else:
+                codigo = st.text_input(
+                    "CHAVE PRIVADA", type="password",
+                    key="mes_db_manual_pin",
+                )
+                autorizado = hmac.compare_digest(codigo, chave_esperada)
+                if st.button(
+                    "CONFIRMAR REPROCESSAMENTO",
+                    type="primary", use_container_width=True,
+                    disabled=not autorizado,
+                    key="mes_db_manual_run",
+                ):
+                    from mes_source_sync import sincronizar_api_mes
+                    with st.spinner("Consultando MES, validando e atualizando a Central..."):
+                        try:
+                            resultado = sincronizar_api_mes(forcar=True)
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        except Exception as exc:
+                            st.error(
+                                "Não foi possível concluir a sincronização. "
+                                f"Tipo: {type(exc).__name__}. "
+                                "Acompanhe o status de normalização da fonte."
+                            )
+                        else:
+                            st.session_state["_mes_db_manual_result"] = resultado
+                            st.rerun()
+    resumo_manual = st.session_state.pop("_mes_db_manual_result", None)
+    if resumo_manual:
+        st.success(
+            f'Coleta MES concluída: {resumo_manual["registros"]} registros válidos, '
+            f'{resumo_manual["quarentena"]} em quarentena. '
+            f'Nova versão da fonte: {resumo_manual["versao"]}. '
+            "O Conversor MRP atualizará as bases derivadas no próximo ciclo."
+        )
+
     normalizadas = [
         item for item in sources
         if str(item.get("normalized_storage_path") or "").strip()
