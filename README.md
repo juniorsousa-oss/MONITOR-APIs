@@ -144,3 +144,35 @@ ignorados com segurança. **Qualquer registro não vazio sem Code bloqueia
 a comparação com a Central**, inclusive quando traz quantidade zero.
 Nenhum material é inventado, somado a outro ou excluído para homologar.
 Nenhum dado bruto é salvo, e o MRP continua alimentado pela fonte atual.
+
+## Conciliação de exceções sem código (10/11/2026)
+
+Uma exportação manual do MES (aba `Geral`, **29.605 registros**) e o
+JSON consultado pelo Monitor (**29.605 registros**) apresentam a mesma
+anomalia estrutural: **1 material sem `Code` e com 1 unidade pendente**.
+No Excel, o registro está na linha 27.322; no JSON, na posição 27.321.
+É uma inconsistência da origem, não um erro de criação do código pelo Monitor.
+
+Para analisar os outros registros sem perder a informação pendente:
+
+1. Abrir o Monitor → **HOMOLOGAÇÃO — RELATÓRIO GERAL VIA API MES**.
+2. Informar a senha privada de homologação.
+3. Selecionar o **Excel manual atualizado**, na aba `Geral`, exportado na
+   mesma data da API. O arquivo fica apenas em memória nesta sessão.
+4. Executar uma única vez **COLETAR E COMPARAR COM O RELATÓRIO ATUAL**.
+5. Conferir comparativo de registros **válidos** e as duas auditorias:
+   API e Excel. Exceções de código são comparadas pelas demais informações
+   apenas para diagnóstico, nunca para inventar um código.
+6. Mesmo que os registros válidos coincidam, a homologação integral continua
+   **BLOQUEADA** enquanto qualquer material não vazio sem código existir.
+
+Quando o usuário não seleciona Excel manual, a Central de Dados continua sendo
+a referência, porém ela pode estar em data diferente da última exportação.
+A comparação de referência manual não altera a versão publicada na Central,
+as fontes FOR001/FOR022/CADASTROS nem os cálculos do MRP. Nenhum dado de
+planilha ou da API é salvo pelo processo de homologação; somente métricas
+agregadas são exibidas.
+
+**Regularização definitiva:** o código do material deve ser conferido na
+origem MES e, se possível, confrontado com o cadastro oficial antes de
+autorizar sincronização automática. Não atribuir código pela descrição apenas.
