@@ -485,6 +485,22 @@ def render_monitor() -> None:
                 key="mes_homologacao_pin",
             )
             autorizado = hmac.compare_digest(digitado, chave_esperada)
+            arquivo_manual = None
+            if autorizado:
+                st.caption(
+                    "RECOMENDADO: utilize o Excel manual do mesmo dia da API. "
+                    "A fonte atualmente publicada na Central pode estar desatualizada."
+                )
+                arquivo_manual = st.file_uploader(
+                    "EXCEL MANUAL — RELATÓRIO GERAL (opcional)",
+                    type=["xlsx"], accept_multiple_files=False,
+                    key="mes_excel_homologacao_manual",
+                )
+                if arquivo_manual is not None:
+                    st.caption(
+                        "O arquivo será lido apenas nesta sessão para comparação. "
+                        "Não será enviado à Central nem publicado no MRP."
+                    )
             if st.button(
                 "COLETAR E COMPARAR COM O RELATÓRIO ATUAL",
                 use_container_width=True, type="primary",
@@ -495,11 +511,17 @@ def render_monitor() -> None:
                     try:
                         # O retorno contém apenas estatísticas; JSON MES não é
                         # guardado no session_state, cache, banco ou navegador.
-                        resumo = coletar_e_comparar()
+                        resumo = coletar_e_comparar(
+                            excel_manual_bytes=(
+                                arquivo_manual.getvalue() if arquivo_manual is not None else None
+                            )
+                        )
                         st.session_state["_mes_homologacao_resumo"] = resumo
                         if resumo.get("homologacao_bloqueada"):
-                            st.warning("Coleta concluída. Existem inconsistências na API MES; "
-                                       "a comparação foi bloqueada para preservar o MRP.")
+                            st.warning(
+                                "Coleta concluída. A homologação integral permanece BLOQUEADA "
+                                "pela existência de materiais sem código."
+                            )
                         else:
                             st.success("Comparação concluída — nenhuma fonte foi substituída.")
                     except ValueError as exc:
@@ -539,9 +561,30 @@ def render_monitor() -> None:
                         st.caption(auditoria["observacao"])
                     elif auditoria["registros_vazios"]:
                         st.info("Linhas totalmente vazias foram identificadas e contabilizadas.")
+                if resultado.get("auditoria_excel"):
+                    excel_aud = resultado["auditoria_excel"]
+                    st.caption(
+                        f'REFERÊNCIA: {resultado.get("referencia", "Excel manual")}. '
+                        f'Registros da referência: '
+                        f'{excel_aud["total_recebido"]} recebidos, '
+                        f'{excel_aud["registros_pendentes"]} em quarentena.'
+                    )
+                    if excel_aud["registros_pendentes"]:
+                        st.warning(
+                            "Também foram identificadas inconsistências na referência. "
+                            "As linhas sem chave ficam fora da comparação parcial, "
+                            "mas continuam impedindo a homologação integral."
+                        )
+                    if resultado.get("excecoes_correspondentes"):
+                        st.info(
+                            "As exceções presentes na API e na referência correspondem "
+                            "pelas informações disponíveis, sem considerar um código inexistente."
+                        )
+                    else:
+                        st.warning("As exceções entre API e referência não correspondem.")
                 if resultado.get("homologacao_bloqueada"):
                     st.caption(resultado["observacao"])
-                else:
+                if resultado.get("api") and resultado.get("excel"):
                     base_mes = resultado["api"]
                     base_excel = resultado["excel"]
                     indicadores = (
@@ -554,6 +597,12 @@ def render_monitor() -> None:
                         ("Pendência", "pendencia"),
                         ("Solicitações divergentes", "solicitacoes_divergentes"),
                     )
+                    if resultado.get("comparacao_parcial"):
+                        st.warning(
+                            "COMPARAÇÃO PARCIAL: totais abaixo consideram somente registros "
+                            "com chaves válidas. Mesmo coincidindo, não autorizam a "
+                            "substituição do Relatório Geral."
+                        )
                     tabela = pd.DataFrame([
                         {"Indicador": label, "API MES": base_mes[key],
                          "Relatório atual": base_excel[key],
