@@ -110,6 +110,9 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 
 .source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem;margin:.3rem 0 1rem}
 .source-card{position:relative;background:#fff;border:1px solid #dfe3e8;border-radius:12px;padding:.95rem 1rem;box-shadow:0 3px 12px rgba(15,23,42,.035);overflow:hidden;min-height:145px}
+.st-key-mes_general_source_card{border-left:4px solid #22c55e!important;border-radius:12px!important;background:#fff!important;box-shadow:0 3px 12px rgba(15,23,42,.035)!important}
+.st-key-mes_general_source_card .source-meta{line-height:1.55}
+.st-key-mes_general_source_card .source-origin{margin-top:.25rem;margin-bottom:.25rem}
 .source-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--source-accent,#111827)}
 .source-top{display:flex;justify-content:space-between;align-items:flex-start;gap:.8rem}
 .source-name{font-size:.8rem;font-weight:900;color:#111827;text-transform:uppercase;margin-bottom:.3rem}
@@ -374,6 +377,39 @@ def integration_card(item: dict) -> str:
         f'{error_html}'
         '</div>'
     )
+
+
+def mes_source_display(source: dict, mes_api: dict) -> dict:
+    """Distingue integração conectada da primeira publicação via MES.
+
+    A fonte histórica pode permanecer origin='MES'; isso não torna o
+    receptor integrado uma API 'planejada'. Porém não alegamos que houve
+    atualização automática antes de constar uma carga MES publicada.
+    """
+    published = (
+        str(source.get("origin") or "").upper() == "MES_GENERAL_REPORT_API"
+        or str(source.get("last_file_name") or "").casefold() == "relatoriogeral_mes.xlsx"
+    )
+    checked_ok = bool(
+        mes_api.get("active")
+        and (
+            mes_api.get("last_success_at")
+            or mes_api.get("http_status") == 200
+        )
+    )
+    connected = published or checked_ok
+    health = str(mes_api.get("status") or "").upper()
+    return {
+        "connected": connected,
+        "published": published,
+        "health": health,
+        "badge": "API INTEGRADA" if connected else "API CONFIGURADA",
+        "mode": "API AUTOMÁTICA · 07:20" if published
+                else "API CONECTADA · 07:20" if connected
+                else "API PROGRAMADA · 07:20",
+        "sync_label": "CARGA VIA API CONFIRMADA" if published
+                      else "PRIMEIRA CARGA VIA API PENDENTE",
+    }
 
 
 def source_card(source: dict) -> str:

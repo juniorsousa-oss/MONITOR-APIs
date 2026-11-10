@@ -778,6 +778,130 @@ def render_monitor() -> None:
         st.success("Nenhum incidente registrado.")
 
 
+def _render_mes_report_card(source: dict, mes_api: dict) -> None:
+    """Cartão da fonte MES com ação real de reprocessamento no próprio cartão."""
+    state = ui_components.mes_source_display(source, mes_api)
+    esc = ui_components.esc
+    status = str(source.get("status") or "AGUARDANDO").upper()
+    last_check = esc(source.get("last_update_label") or "Nunca")
+    last_change = esc(source.get("content_update_label") or "Nunca")
+    rows = esc(source.get("rows_count") or 0)
+    version = int(source.get("version") or 0)
+    health = state["health"]
+    health_chip = (
+        "RECEPTOR ONLINE" if health == "ONLINE"
+        else "RECEPTOR EM ATENÇÃO" if health == "ATENÇÃO"
+        else "RECEPTOR OFFLINE" if health == "OFFLINE"
+        else "RECEPTOR SEM VERIFICAÇÃO"
+    )
+    with st.container(border=True, key="mes_general_source_card"):
+        top, status_col = st.columns([4, 1], vertical_alignment="top")
+        with top:
+            st.markdown(
+                '<div class="source-name">RELATÓRIO GERAL</div>'
+                '<div class="source-meta">'
+                f'Última conferência: <b>{last_check}</b><br>'
+                f'Última mudança: <b>{last_change}</b><br>'
+                f'Registros: <b>{rows}</b> · Versão <b>{version}</b>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        with status_col:
+            st.markdown(
+                f'<div class="source-badge">{esc(status)}</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            '<div class="source-origin">'
+            '<span class="source-chip">MES</span>'
+            f'<span class="source-chip">{esc(state["mode"])}</span>'
+            f'<span class="source-chip">{esc(state["badge"])}</span>'
+            f'<span class="source-chip">{esc(health_chip)}</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        info, action = st.columns([3.2, 1.25], vertical_alignment="center")
+        with info:
+            st.caption(
+                "Usado por: Conversor MRP · Gestão de Equipes"
+            )
+            if not state["published"]:
+                st.caption("Aguardando a primeira publicação via API MES.")
+        with action:
+            with st.popover(
+                "↻ Reprocessar",
+                help="Consultar a API MES e publicar uma nova versão validada do Relatório Geral",
+                use_container_width=True,
+            ):
+                st.caption("Reprocessamento manual · somente Relatório Geral.")
+                key_config = os.getenv(
+                    "SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", ""
+                )
+                if len(key_config) < 12:
+                    st.warning(
+                        "Configure o código privado de homologação em "
+                        "Streamlit Secrets para autorizar a atualização."
+                    )
+                pin = st.text_input(
+                    "Código privado de homologação",
+                    type="password",
+                    key="mes_reprocessamento_pin",
+                )
+                autorizado = (
+                    len(key_config) >= 12
+                    and hmac.compare_digest(pin, key_config)
+                )
+                if st.button(
+                    "CONFIRMAR REPROCESSAMENTO",
+                    key="mes_atualizar_agora",
+                    disabled=not autorizado,
+                    use_container_width=True,
+                ):
+                    from mes_general_report_sync import sincronizar_relatorio_geral
+                    with st.spinner("Validando e atualizando a fonte Relatório Geral..."):
+                        try:
+                            retorno = sincronizar_relatorio_geral()
+                            if retorno["status"] == "PROTEGER_BASE":
+                                msg = (
+                                    "Fonte anterior preservada: anomalias relevantes "
+                                    "na resposta MES. Nenhuma atualização publicada."
+                                )
+                                kind = "error"
+                            elif retorno.get("publicado"):
+                                msg = (
+                                    f'Nova versão publicada: {retorno["validos"]:,} '
+                                    f'registros válidos e {retorno["quarentena"]:,} '
+                                    "em quarentena. O Conversor MRP processará "
+                                    "a fonte no próximo ciclo."
+                                )
+                                kind = "success"
+                            else:
+                                msg = "Consulta concluída sem necessidade de nova versão."
+                                kind = "info"
+                        except Exception:
+                            kind = "error"
+                            msg = (
+                                "A atualização não pôde ser concluída. Consulte "
+                                "o histórico técnico; a fonte anterior não deve "
+                                "ser substituída sem validação."
+                            )
+                        st.session_state["mes_manual_result"] = {
+                            "kind": kind,
+                            "message": msg,
+                        }
+                        st.rerun()
+        outcome = st.session_state.get("mes_manual_result")
+        if outcome:
+            kind = outcome.get("kind")
+            msg = outcome.get("message", "")
+            if kind == "success":
+                st.success(msg)
+            elif kind == "error":
+                st.error(msg)
+            else:
+                st.info(msg)
+
+
 def render_database() -> None:
     render_header(
         "BANCO DE DADOS | SETTA",
@@ -898,92 +1022,27 @@ def render_database() -> None:
         }
         for source in sources
     ]
-    st.markdown(
-        '<div class="source-grid">'
-        + "".join(source_card(source) for source in normalized)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-
-    # Controle compacto e restrito à fonte Relatório Geral.
-    # A consulta manual só ocorre por clique autorizado. As demais fontes
-    # não são afetadas. A tarefa cron usa executor separado do Streamlit.
-    relatorio_mes = next(
-        (source for source in sources
-         if source.get("source_key") == "relatorio_geral"),
+    mes_receptor = next(
+        (
+            api for api in system_status
+            if str(api.get("id") or "") == "11111111-1111-4111-8111-111111111120"
+        ),
         {},
     )
-    with st.container(border=True):
-        col_mes, col_button = st.columns([4, 1], vertical_alignment="center")
-        with col_mes:
-            st.markdown("**RELATÓRIO GERAL · API MES**")
-            st.caption(
-                "Atualização planejada: 07h20 (Brasília), diariamente. "
-                "Ao publicar nova versão, o Conversor MRP a detecta no "
-                "worker periódico e reprocessa os dados tratados."
-            )
-            st.caption(
-                "Origem da fonte atual: "
-                + str(relatorio_mes.get("origin") or "Aguardando primeira carga via API")
-                + " · Última atualização: "
-                + store.format_dt(relatorio_mes.get("last_update_at"))
-            )
-        key_config = os.getenv("SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", "")
-        if len(key_config) < 12:
-            st.caption(
-                "Atualização manual requer o código privado de homologação "
-                "configurado no Streamlit Secrets."
-            )
-        senha = st.text_input(
-            "CÓDIGO PRIVADO · REPROCESSAMENTO MANUAL",
-            type="password",
-            key="mes_reprocessamento_pin",
-            label_visibility="collapsed",
-            placeholder="Código privado para autorizar a atualização",
-        )
-        autorizado = (
-            len(key_config) >= 12
-            and hmac.compare_digest(senha, key_config)
-        )
-        with col_button:
-            rodar = st.button(
-                "ATUALIZAR AGORA",
-                key="mes_atualizar_agora",
-                disabled=not autorizado,
-                use_container_width=True,
-                help="Consultar MES, publicar fonte validada e acionar o reprocessamento periódico",
-            )
-        if rodar:
-            from mes_general_report_sync import sincronizar_relatorio_geral
-            with st.spinner("Consultando o MES e validando a carga do Relatório Geral..."):
-                try:
-                    retorno = sincronizar_relatorio_geral()
-                    if retorno["status"] == "PROTEGER_BASE":
-                        st.error(
-                            "Fonte preservada: anomalias generalizadas detectadas; "
-                            "a Central não foi alterada."
-                        )
-                        for motivo in retorno.get("motivos_protecao") or []:
-                            st.caption(motivo)
-                    elif retorno.get("publicado"):
-                        st.success(
-                            f'Fonte MES atualizada com {retorno["validos"]:,} '
-                            f'registros válidos e {retorno["quarentena"]:,} '
-                            "em quarentena. O Conversor MRP processará a nova "
-                            "versão no próximo ciclo do worker."
-                        )
-                    else:
-                        st.info(
-                            "Consulta concluída. A fonte está sem alteração; "
-                            "nenhuma nova versão foi criada."
-                        )
-                except Exception:
-                    st.error(
-                        "Não foi possível executar a atualização MES. "
-                        "A última versão normalizada permanece disponível. "
-                        "Consulte os registros técnicos do ambiente."
+    # Os demais cartões mantêm o componente de origem atual.
+    # Relatório Geral recebe um cartão nativo Streamlit para que o botão
+    # seja realmente clicável dentro dele, não ao final das 14 fontes.
+    for position in range(0, len(normalized), 2):
+        cols = st.columns(2, gap="medium")
+        for offset, source in enumerate(normalized[position:position + 2]):
+            with cols[offset]:
+                if source.get("source_key") == "relatorio_geral":
+                    _render_mes_report_card(source, mes_receptor)
+                else:
+                    st.markdown(
+                        source_card(source),
+                        unsafe_allow_html=True,
                     )
-
 
     normalizadas = [
         item for item in sources
