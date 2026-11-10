@@ -118,7 +118,7 @@ class MesSourceSyncTests(unittest.TestCase):
         self.assertTrue(result["publicado"])
         args = saved.call_args.args
         self.assertEqual(args[0], "relatorio_geral")
-        self.assertEqual(args[3], 200)
+        self.assertEqual(saved.call_args.kwargs["rows_count"], 200)
 
     def test_resposta_igual_não_gera_nova_versão(self):
         raw_records = [item()] * 200 + [item(Code=None)]
