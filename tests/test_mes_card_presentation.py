@@ -39,6 +39,23 @@ class MesCardTests(unittest.TestCase):
         self.assertEqual(state["badge"], "API CONFIGURADA")
         self.assertFalse(state["published"])
 
+    def test_banco_consulta_status_real_da_api_em_vez_de_catalogo(self):
+        source = (ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        database = next(
+            fn for fn in tree.body if isinstance(fn, ast.FunctionDef)
+            and fn.name == "render_database"
+        )
+        db_source = ast.get_source_segment(source, database)
+        self.assertIn(
+            "monitor.hydrate_all(store.list_apis(include_demo=False))",
+            db_source,
+        )
+        self.assertNotIn(
+            "monitor.hydrate_all(store.system_apis())",
+            db_source,
+        )
+
     def test_acao_e_renderizada_na_mesma_unidade_visual(self):
         source = (ROOT / "streamlit_app.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
