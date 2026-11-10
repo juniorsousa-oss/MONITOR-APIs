@@ -1191,9 +1191,15 @@ def list_sources() -> list[dict]:
             base["key"] == "pmp"
             and str(row.get("origin") or "").upper() == "ERP_INDUSTRIAL_API"
         )
+        # O commit original da Central pode conservar a origem histórica
+        # "MES" mesmo depois de uma carga pela API; identificar também o
+        # nome de arquivo reservado exclusivamente ao sincronizador.
         mes_api_active = (
             base["key"] == "relatorio_geral"
-            and str(row.get("origin") or "").upper() == "MES_GENERAL_REPORT_API"
+            and (
+                str(row.get("origin") or "").upper() == "MES_GENERAL_REPORT_API"
+                or str(row.get("last_file_name") or "").casefold() == "relatoriogeral_mes.xlsx"
+            )
         )
         if pmp_api_active and normalized_current and operational_status == "DESATUALIZADO":
             operational_status = "SEM ALTERAÇÃO"
