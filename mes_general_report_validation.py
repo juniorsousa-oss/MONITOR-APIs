@@ -503,6 +503,7 @@ def coletar_e_comparar(*, mes_session=None, central_session=None,
         return {
             "homologacao_bloqueada": True,
             "auditoria": auditoria,
+            "politica_continuidade": avaliar_continuidade_mes(auditoria),
             "observacao": "JSON recebido, mas existem registros para conferência no MES. "
                           "Envie o Excel manual atualizado para comparar as linhas válidas "
                           "sem autorizar a substituição da fonte.",
