@@ -13,6 +13,7 @@ on:
       - fix/mes-generalreport-auth-mode-20261109
       - fix/mes-postman-parity-20261109
       - fix/mes-card-integrated-button-20261110
+      - fix/mes-receptor-status-and-derived-version-20261110
     paths:
       - mes_general_report.py
       - mes_general_report_validation.py
