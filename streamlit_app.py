@@ -957,7 +957,10 @@ def render_database() -> None:
         if str(item.get("status")).upper() in {"ATUALIZADO", "SEM ALTERAÇÃO"}
     )
 
-    system_status = monitor.hydrate_all(store.system_apis())
+    # Ler o estado real persistido no backend, não apenas o catálogo estático.
+    # O catálogo não inclui last_http_status/last_success_at; por isso o
+    # cartão MES mostrava "RECEPTOR SEM VERIFICAÇÃO" apesar de HTTP 200.
+    system_status = monitor.hydrate_all(store.list_apis(include_demo=False))
     pmp_receptor = next(
         (
             api for api in system_status
