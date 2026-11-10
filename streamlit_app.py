@@ -616,6 +616,30 @@ def render_monitor() -> None:
                     b.metric("OP-produtos somente no Excel", d["somente_excel"])
                     c.metric("Quantidades divergentes", d["quantidades_diferentes"])
                     d_col.metric("Solicitações/datas divergentes", d["solicitacoes_por_data_diferentes"])
+                    detalhamento = resultado.get("diagnostico_diferencas") or {}
+                    if detalhamento:
+                        st.markdown("#### ORIGEM DAS DIFERENÇAS DE QUANTIDADE")
+                        st.caption(
+                            "Somente na API: contribuição das combinações OP/produto ausentes "
+                            "no Excel. Alteração nas chaves existentes: diferença entre "
+                            "quantidades das combinações presentes nas duas fontes."
+                        )
+                        _setta_dataframe(
+                            pd.DataFrame(detalhamento["diferencas_por_origem"]),
+                            use_container_width=True, hide_index=True,
+                        )
+                        st.markdown("#### DATAS DE SOLICITAÇÃO DAS COMBINAÇÕES EXCLUSIVAS DA API")
+                        if detalhamento["datas_solicitacoes_apenas_api"]:
+                            _setta_dataframe(
+                                pd.DataFrame(detalhamento["datas_solicitacoes_apenas_api"]),
+                                use_container_width=True, hide_index=True,
+                            )
+                        st.caption(
+                            f'Exibindo até 12 datas das '
+                            f'{detalhamento["total_datas_distintas_apenas_api"]} '
+                            "datas distintas encontradas."
+                        )
+                        st.caption(detalhamento["observacao_datas"])
                     if resultado["iguais_no_criterio_comparado"]:
                         st.success("Os valores e as chaves comparados coincidem. A fonte NÃO foi publicada.")
                     else:

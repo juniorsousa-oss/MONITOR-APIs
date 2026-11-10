@@ -97,6 +97,54 @@ class HomologacaoTests(unittest.TestCase):
         self.assertEqual(x["comparativo"]["somente_api"], 1)
         self.assertEqual(x["comparativo"]["somente_excel"], 1)
 
+    def test_decomposicao_separa_novos_pares_e_alteracoes_existentes(self):
+        api = [
+            mes(Code="00000441", NecessaryQuantity=6, AttendedQuantity=3),
+            mes(Code="00000555", NecessaryQuantity=3, AttendedQuantity=1),
+        ]
+        referencia = pack(
+            excel_row(codigo="00000441", necessidade=5, atendido=2),
+        )
+        resultado = comparar_documentos(api, referencia)
+        diagnostico = resultado["diagnostico_diferencas"]
+        registros = {x["Indicador"]: x for x in diagnostico["diferencas_por_origem"]}
+        nec = registros["Quantidade necessária"]
+        atd = registros["Quantidade atendida"]
+        pend = registros["Pendência"]
+        self.assertEqual(nec["Somente na API"], 3)
+        self.assertEqual(nec["Alteração em chaves existentes"], 1)
+        self.assertEqual(nec["Diferença total"], 4)
+        self.assertEqual(atd["Somente na API"], 1)
+        self.assertEqual(atd["Alteração em chaves existentes"], 1)
+        self.assertEqual(atd["Diferença total"], 2)
+        self.assertEqual(pend["Somente na API"], 2)
+        self.assertEqual(pend["Alteração em chaves existentes"], 0)
+        self.assertEqual(pend["Diferença total"], 2)
+        self.assertEqual(resultado["comparativo"]["somente_api"], 1)
+        self.assertEqual(resultado["comparativo"]["quantidades_diferentes"], 1)
+        self.assertEqual(
+            diagnostico["datas_solicitacoes_apenas_api"],
+            [{"Data da solicitação": "2026-08-11", "Solicitações apenas na API": 1}],
+        )
+        self.assertNotIn("00000555", str(diagnostico))
+        self.assertNotIn("23040102007", str(diagnostico))
+
+    def test_decomposicao_trata_pares_somente_excel_com_sinal_negativo(self):
+        resultado = comparar_documentos(
+            [mes(Code="00000441", NecessaryQuantity=5, AttendedQuantity=2)],
+            pack(
+                excel_row(codigo="00000441", necessidade=5, atendido=2),
+                excel_row(codigo="00000666", necessidade=4, atendido=0),
+            ),
+        )
+        nec = next(
+            item for item in resultado["diagnostico_diferencas"]["diferencas_por_origem"]
+            if item["Indicador"] == "Quantidade necessária"
+        )
+        self.assertEqual(nec["Somente no Excel"], -4)
+        self.assertEqual(nec["Diferença total"], -4)
+        self.assertEqual(resultado["comparativo"]["somente_excel"], 1)
+
     def test_necessidades_divergentes_mesmo_dia_bloqueiam_aprovacao(self):
         x = comparar_documentos(
             [mes(NecessaryQuantity=5), mes(NecessaryQuantity=7)],
