@@ -1,0 +1,32 @@
+name: SETTA MES — Relatório Geral diário 07h20
+
+on:
+  schedule:
+    # 07:20 America/Sao_Paulo (UTC-03:00), todos os dias.
+    # O GitHub Actions pode iniciar com atraso em dias de alta carga.
+    - cron: "20 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: setta-mes-generalreport-source
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SETTA_MES_GENERAL_REPORT_TOKEN: ${{ secrets.SETTA_MES_GENERAL_REPORT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Dependências
+        run: pip install -r requirements.txt
+      - name: Coleta, proteção, quarentena e atualização da Central
+        run: python .github/scripts/sync_mes_daily.py
