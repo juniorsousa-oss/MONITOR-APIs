@@ -362,8 +362,13 @@ def _download_limited(url, *, headers=None, session=None, limit=MAX_MES_BYTES):
             resp.close()
 
 
-def coletar_e_comparar(*, mes_session=None, central_session=None):
-    """Operação exclusiva do painel manual e protegida por PIN próprio."""
+def coletar_e_comparar(*, mes_session=None, central_session=None,
+                      excel_manual_bytes=None):
+    """Operação manual protegida por PIN, sem publicação ou alteração da fonte.
+
+    Opcionalmente compara o Excel recém-exportado, sem salvá-lo em disco;
+    o padrão continua utilizando a Central de Dados.
+    """
     token = str(__import__("os").getenv(TOKEN_ENV, "")).strip()
     if not token:
         raise ValueError("Token da API MES não está disponível no servidor.")
@@ -376,15 +381,25 @@ def coletar_e_comparar(*, mes_session=None, central_session=None):
         api_payload = json.loads(raw_mes.decode("utf-8-sig"))
     except (ValueError, UnicodeError):
         raise ValueError("MES respondeu HTTP 200, mas o conteúdo não é JSON válido.") from None
-    # Inspecionar todas as linhas em vez de interromper na primeira com Code
-    # ausente; ainda não fazemos comparação se houver registro sem identificação.
-    auditoria, registros_validos = auditar_registros_mes(api_payload)
+    # Se o operador forneceu o Excel mais recente, permite comparar apenas
+    # as linhas válidas, com a exceção bloqueando a homologação integral.
+    # Sem upload, preservamos a proteção original antes de consultar a Central.
+    from mes_general_report_reconciliation import (
+        pacote_do_excel_manual, comparar_com_quarentena,
+    )
+    auditoria, _ = auditar_registros_mes(api_payload)
+    if excel_manual_bytes is not None:
+        pacote = pacote_do_excel_manual(excel_manual_bytes)
+        return comparar_com_quarentena(
+            api_payload, pacote, referencia="Excel manual enviado nesta sessão",
+        )
     if not auditoria["aprovado_para_comparacao"]:
         return {
             "homologacao_bloqueada": True,
             "auditoria": auditoria,
             "observacao": "JSON recebido, mas existem registros para conferência no MES. "
-                          "A Central e o MRP continuam preservados.",
+                          "Envie o Excel manual atualizado para comparar as linhas válidas "
+                          "sem autorizar a substituição da fonte.",
         }
     meta = store.central_api_call(
         "source_normalized_download", {"source_key": "relatorio_geral"}, timeout=35
@@ -409,6 +424,6 @@ def coletar_e_comparar(*, mes_session=None, central_session=None):
         pack = json.loads(unpacked.decode("utf-8"))
     except (ValueError, OSError, UnicodeError):
         raise ValueError("Não foi possível interpretar a fonte normalizada da Central.") from None
-    resultado = comparar_documentos(registros_validos, pack)
-    resultado["auditoria"] = auditoria
-    return resultado
+    return comparar_com_quarentena(
+        api_payload, pack, referencia="Central de Dados (última versão publicada)",
+    )
