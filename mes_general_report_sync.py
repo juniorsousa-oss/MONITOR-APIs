@@ -77,34 +77,10 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
                 valor("ConferenceResponse"), _dia(obj.get("ConferenceDate")),
             ])
         elif any(v is not None and str(v).strip() for v in obj.values()):
-            # Se apenas a chave está ausente/inválida mas quantidades e datas
-            # são válidas, manter a linha na aba Geral COM A CHAVE REAL VAZIA:
-            # o Conversor já a coloca na quarentena derivada.
-            try:
-                qnec = _quantidade(obj["NecessaryQuantity"], "NecessaryQuantity", indice)
-                qatd = _quantidade(obj["AttendedQuantity"], "AttendedQuantity", indice)
-                data = _dia(obj.get("LastRequest"))
-                sep = _dia(obj.get("SeparationDate"))
-                conf = _dia(obj.get("ConferenceDate"))
-                codigo = valor("Code")
-                projeto = valor("OP")
-                somente_chave = (
-                    not codigo
-                    or not projeto
-                    or not codigo.isdigit()
-                    or not projeto.isdigit()
-                    or len(codigo) > 8
-                    or len(projeto) > 11
-                )
-                if somente_chave:
-                    linhas.append([
-                        projeto, codigo, valor("Description"), data,
-                        qnec, qatd, valor("SeparationUser"), sep,
-                        valor("ConferenceResponse"), conf,
-                    ])
-            except (KeyError, ValueError):
-                # Quantidade inválida ou data inválida nunca entra em MRP.
-                pass
+            # NUNCA inserir exceções na aba Geral: o Conversor poderia
+            # recuperar um código por descrição e criar demanda não
+            # homologada. Toda exceção segue na aba lateral de auditoria,
+            # publicada como base derivada de inconsistências.
             excecoes.append({
                 "Linha JSON": indice,
                 "Projeto informado": valor("OP"),
