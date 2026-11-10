@@ -9,11 +9,15 @@ on:
       - feat/mes-reconciliar-excecoes-e-excel-20261110
       - feat/mes-diagnostico-diferencas-20261110
       - feat/mes-continuidade-com-quarentena-20261110
+      - feat/mes-auto-0720-source-sync-20261110
       - fix/mes-generalreport-auth-mode-20261109
       - fix/mes-postman-parity-20261109
     paths:
       - mes_general_report.py
       - mes_general_report_validation.py
+      - mes_general_report_sync.py
+      - tests/test_mes_general_report_sync.py
+      - .github/workflows/mes-generalreport-daily.yml
       - mes_general_report_reconciliation.py
       - tests/test_mes_general_report_reconciliation.py
       - streamlit_app.py
@@ -35,6 +39,6 @@ jobs:
       - name: Dependências de validação
         run: python -m pip install "requests>=2.32,<3" "pandas>=2.2,<3" "openpyxl>=3.1,<4"
       - name: Validar sintaxe
-        run: python -m py_compile data_store.py monitor_logic.py mes_general_report.py mes_general_report_validation.py mes_general_report_reconciliation.py streamlit_app.py
+        run: python -m py_compile data_store.py monitor_logic.py mes_general_report.py mes_general_report_validation.py mes_general_report_reconciliation.py mes_general_report_sync.py streamlit_app.py
       - name: Testar integração sem credenciais reais
         run: python -m unittest discover -s tests -p 'test_mes_general_report*.py' -v

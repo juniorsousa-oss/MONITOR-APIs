@@ -1191,6 +1191,10 @@ def list_sources() -> list[dict]:
             base["key"] == "pmp"
             and str(row.get("origin") or "").upper() == "ERP_INDUSTRIAL_API"
         )
+        mes_api_active = (
+            base["key"] == "relatorio_geral"
+            and str(row.get("origin") or "").upper() == "MES_GENERAL_REPORT_API"
+        )
         if pmp_api_active and normalized_current and operational_status == "DESATUALIZADO":
             operational_status = "SEM ALTERAÇÃO"
 
@@ -1201,12 +1205,13 @@ def list_sources() -> list[dict]:
                 "apps": base["apps"],
                 "source_system": base["source_system"],
                 "mode": (
+                    "API AUTOMÁTICA · 07:20" if mes_api_active else
                     "API AUTOMÁTICA" if pmp_api_active else
                     "CONTINGÊNCIA MANUAL" if base["key"] == "pmp" and bool(row.get("available")) else
                     base["mode"]
                 ),
                 "api_plan": bool(base.get("api_plan")),
-                "api_active": pmp_api_active,
+                "api_active": pmp_api_active or mes_api_active,
                 "status": operational_status,
                 "stored_status": row.get("status") or "AGUARDANDO",
                 "last_update_at": row.get("last_update_at"),

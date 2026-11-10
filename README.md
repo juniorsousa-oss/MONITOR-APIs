@@ -222,3 +222,56 @@ rotina de processamento é acionada.
 sinaliza a situação na homologação. O Monitor não envia dados à Central;
 a coleta/persistência automática da API ainda depende de uma etapa de
 integração dedicada e configuração segura do ambiente executor.
+
+## GeneralReport MES — sincronização diária às 07h20 e reprocessamento manual
+
+A origem `relatorio_geral` pode ser alimentada diretamente pelo MES após
+validação de estrutura, volume e exceções. O mesmo `source_key` da Central
+é usado: não é criada uma nova fonte paralela.
+
+- **Agendador:** GitHub Actions `.github/workflows/mes-generalreport-daily.yml`
+  com cron `20 10 * * *` (10:20 UTC / 07:20 Brasília). O agendador do GitHub
+  pode começar alguns minutos depois; a hora não é uma garantia de execução exata.
+- **Ação manual:** Banco de Dados → Relatório Geral · API MES →
+  **ATUALIZAR AGORA**, autorizada pelo PIN já usado na homologação.
+  Consulta a API, separa erros, faz pré-validação do Excel e publica a
+  fonte na Central. O `pipeline_worker.py` do Conversor MRP verifica
+  alterações aproximadamente a cada 5 minutos e atualiza sua base derivada.
+- **Identificação:** após a primeira carga API, o cartão da fonte mostra
+  `API INTEGRADA` e `API AUTOMÁTICA · 07:20`, com data e registros.
+- **Exceções:** registros válidos são processados; registros com problema
+  ficam registrados em `Inconsistencias MES` e, quando a chave é
+  inválida mas os números/datas são legíveis, também entram na quarentena
+  já existente do Conversor MRP. Não inventar código ou quantidade.
+- **Proteções:** uma API vazia, mais de 0,5% de inconsistências ou volume
+  inferior a 80% da fonte anterior não substitui a fonte. A nova planilha
+  é normalizada em memória antes de qualquer commit.
+- **Persistência:** uma nova versão do Relatório Geral só é publicada após
+  passar na pré-validação; se os bytes e a fonte normalizada forem idênticos,
+  é registrada apenas uma nova conferência.
+
+### Configuração obrigatória do agendamento
+
+O Streamlit já recebe `SETTA_MES_GENERAL_REPORT_TOKEN` em **Secrets**,
+mas o GitHub Actions é um ambiente separado e não lê os Secrets do Streamlit.
+Configure o segredo de repositório do GitHub:
+
+1. `SETTA_MES_GENERAL_REPORT_TOKEN` = credencial Bearer atual, sem
+   o prefixo `Bearer `, em
+   **GitHub → MONITOR-APIs → Settings → Secrets and variables → Actions**.
+2. Opcional: `SETTA_SUPABASE_ANON_KEY` para utilizar uma chave anon
+   própria do ambiente; a conexão à Central segue a configuração
+   existente do aplicativo.
+
+Sem `SETTA_MES_GENERAL_REPORT_TOKEN` no GitHub, o workflow agendado
+**falhará sem consultar a API**; não se deve declarar a automação
+operacionalmente ativa antes da configuração e de uma execução real bem-sucedida.
+
+Por segurança, substitua o Bearer anteriormente exposto em imagens e
+mensagens antes de adotá-lo como segredo definitivo.
+
+**Atenção:** publicar a fonte e processar a base derivada são etapas
+distintas. O worker periódico pode atrasar em função da fila do GitHub.
+O botão manual não aguarda o processamento derivado. A fonte anterior
+permanece disponível em histórico de versões, e em erros estruturais
+o código protege a versão atual.
