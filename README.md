@@ -176,3 +176,24 @@ agregadas são exibidas.
 **Regularização definitiva:** o código do material deve ser conferido na
 origem MES e, se possível, confrontado com o cadastro oficial antes de
 autorizar sincronização automática. Não atribuir código pela descrição apenas.
+
+## Investigação de diferenças API MES × Excel (10/11/2026)
+
+A comparação operacional identificou 45 pares OP/produto exclusivos da API,
+23 pares comuns com quantidade diferente e uma exceção sem código presente
+nas duas origens. Essa diferença pode decorrer de alterações no MES após a
+exportação manual, mas isso **não está confirmado**.
+
+O detalhamento adicional da seção de homologação apresenta:
+
+- Diferença de necessidade, atendimento e pendência decomposta entre
+  **somente na API**, **somente no Excel** e **alteração em pares comuns**.
+- Até 12 datas de solicitação associadas aos pares exclusivos da API,
+  com contagens agregadas, sem revelar OP, código, descrição ou usuário.
+- Advertência de que `LastRequest` informa a data da solicitação,
+  **não** a data/hora da inclusão no sistema.
+
+A finalidade é distinguir variação temporal de diferenças persistentes.
+O próximo teste ideal compara Excel e API com o menor intervalo possível,
+registrando o momento de extração e mantendo a quarentena do material
+sem código. Nenhuma nova fonte é publicada automaticamente.
