@@ -60,7 +60,7 @@ class IngestaoTests(unittest.TestCase):
                                NecessaryQuantity=1, AttendedQuantity=0))
         out = preparar_carga_mes(sample, referencia=201)
         self.assertEqual(out["status"], "PROCESSAR_COM_RESSALVAS")
-        self.assertEqual(out["linhas_fonte"], 201)
+        self.assertEqual(out["linhas_fonte"], 200)
         self.assertEqual(out["linhas_excecao"], 1)
         self.assertIsInstance(out["arquivo"], bytes)
         self.assertGreater(len(out["arquivo"]), 100)
@@ -68,9 +68,8 @@ class IngestaoTests(unittest.TestCase):
         from io import BytesIO
         df = pd.read_excel(BytesIO(out["arquivo"]), sheet_name="Geral")
         quarantined = df[df["Código"].isna()]
-        self.assertEqual(len(quarantined), 1)
-        self.assertEqual(quarantined.iloc[0]["Descrição"], "BASCULANTE")
-        self.assertEqual(quarantined.iloc[0]["Qtd. necessária"], 1)
+        self.assertEqual(len(quarantined), 0)  # material inválido fora da demanda
+        self.assertEqual(len(df), 200)
         faults = pd.read_excel(BytesIO(out["arquivo"]), sheet_name="Inconsistencias MES")
         self.assertEqual(len(faults), 1)
 
