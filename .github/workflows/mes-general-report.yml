@@ -8,6 +8,7 @@ on:
       - fix/mes-auditoria-codigo-ausente-20261110
       - feat/mes-reconciliar-excecoes-e-excel-20261110
       - feat/mes-diagnostico-diferencas-20261110
+      - feat/mes-continuidade-com-quarentena-20261110
       - fix/mes-generalreport-auth-mode-20261109
       - fix/mes-postman-parity-20261109
     paths:
