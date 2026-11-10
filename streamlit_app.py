@@ -495,8 +495,13 @@ def render_monitor() -> None:
                     try:
                         # O retorno contém apenas estatísticas; JSON MES não é
                         # guardado no session_state, cache, banco ou navegador.
-                        st.session_state["_mes_homologacao_resumo"] = coletar_e_comparar()
-                        st.success("Comparação concluída — nenhuma fonte foi substituída.")
+                        resumo = coletar_e_comparar()
+                        st.session_state["_mes_homologacao_resumo"] = resumo
+                        if resumo.get("homologacao_bloqueada"):
+                            st.warning("Coleta concluída. Existem inconsistências na API MES; "
+                                       "a comparação foi bloqueada para preservar o MRP.")
+                        else:
+                            st.success("Comparação concluída — nenhuma fonte foi substituída.")
                     except ValueError as exc:
                         st.session_state.pop("_mes_homologacao_resumo", None)
                         st.error(str(exc))
@@ -505,37 +510,69 @@ def render_monitor() -> None:
                         st.error("Não foi possível concluir a comparação. Verifique a disponibilidade da Central.")
             resultado = st.session_state.get("_mes_homologacao_resumo")
             if autorizado and resultado:
-                base_mes = resultado["api"]
-                base_excel = resultado["excel"]
-                indicadores = (
-                    ("Linhas brutas", "linhas"), ("OPs distintas", "ops"),
-                    ("Códigos distintos", "produtos"),
-                    ("Pares OP + código", "op_produto"),
-                    ("Solicitações distintas", "solicitacoes_distintas"),
-                    ("Quantidade necessária", "necessidade"),
-                    ("Quantidade atendida", "atendimento"),
-                    ("Pendência", "pendencia"),
-                    ("Solicitações divergentes", "solicitacoes_divergentes"),
-                )
-                tabela = pd.DataFrame([
-                    {"Indicador": label, "API MES": base_mes[key],
-                     "Relatório atual": base_excel[key],
-                     "Diferença (API − atual)": round(float(base_mes[key]) - float(base_excel[key]), 4)}
-                    for label, key in indicadores
-                ])
-                _setta_dataframe(tabela, use_container_width=True, hide_index=True)
-                d = resultado["comparativo"]
-                a, b, c, d_col = st.columns(4)
-                a.metric("OP-produtos somente na API", d["somente_api"])
-                b.metric("OP-produtos somente no Excel", d["somente_excel"])
-                c.metric("Quantidades divergentes", d["quantidades_diferentes"])
-                d_col.metric("Solicitações/datas divergentes", d["solicitacoes_por_data_diferentes"])
-                if resultado["iguais_no_criterio_comparado"]:
-                    st.success("Os valores e as chaves comparados coincidem. A fonte NÃO foi publicada.")
+                auditoria = resultado.get("auditoria") or {}
+                if auditoria:
+                    st.caption("AUDITORIA ESTRUTURAL DO JSON — SEM DADOS INDIVIDUAIS")
+                    a0, a1, a2, a3 = st.columns(4)
+                    a0.metric("Registros recebidos", auditoria["total_recebido"])
+                    a1.metric("Registros válidos", auditoria["registros_validos"])
+                    a2.metric("Pendências de dados", auditoria["registros_pendentes"])
+                    a3.metric("Linhas completamente vazias", auditoria["registros_vazios"])
+                    if auditoria["registros_pendentes"]:
+                        st.error(
+                            "HOMOLOGAÇÃO BLOQUEADA: registros sem identificação ou "
+                            "com campos inválidos. A API não substituirá o Excel."
+                        )
+                        if auditoria["sem_codigo_com_movimento"]:
+                            st.warning(
+                                f'{auditoria["sem_codigo_com_movimento"]} registro(s) sem código '
+                                "possuem quantidade positiva. Devem ser corrigidos na origem."
+                            )
+                        motivos = pd.DataFrame([
+                            {"Tipo de inconsistência": tipo, "Registros": qtd}
+                            for tipo, qtd in sorted(auditoria["motivos"].items())
+                        ])
+                        _setta_dataframe(motivos, use_container_width=True, hide_index=True)
+                        st.caption("Exemplos de posições com inconsistência — sem conteúdo sensível:")
+                        _setta_dataframe(pd.DataFrame(auditoria["exemplos"]),
+                                         use_container_width=True, hide_index=True)
+                        st.caption(auditoria["observacao"])
+                    elif auditoria["registros_vazios"]:
+                        st.info("Linhas totalmente vazias foram identificadas e contabilizadas.")
+                if resultado.get("homologacao_bloqueada"):
+                    st.caption(resultado["observacao"])
                 else:
-                    st.warning("Existem divergências: manter o Excel até a investigação e homologação.")
-                st.caption(resultado["criterio"])
-                st.caption(resultado["observacao"])
+                    base_mes = resultado["api"]
+                    base_excel = resultado["excel"]
+                    indicadores = (
+                        ("Linhas brutas", "linhas"), ("OPs distintas", "ops"),
+                        ("Códigos distintos", "produtos"),
+                        ("Pares OP + código", "op_produto"),
+                        ("Solicitações distintas", "solicitacoes_distintas"),
+                        ("Quantidade necessária", "necessidade"),
+                        ("Quantidade atendida", "atendimento"),
+                        ("Pendência", "pendencia"),
+                        ("Solicitações divergentes", "solicitacoes_divergentes"),
+                    )
+                    tabela = pd.DataFrame([
+                        {"Indicador": label, "API MES": base_mes[key],
+                         "Relatório atual": base_excel[key],
+                         "Diferença (API − atual)": round(float(base_mes[key]) - float(base_excel[key]), 4)}
+                        for label, key in indicadores
+                    ])
+                    _setta_dataframe(tabela, use_container_width=True, hide_index=True)
+                    d = resultado["comparativo"]
+                    a, b, c, d_col = st.columns(4)
+                    a.metric("OP-produtos somente na API", d["somente_api"])
+                    b.metric("OP-produtos somente no Excel", d["somente_excel"])
+                    c.metric("Quantidades divergentes", d["quantidades_diferentes"])
+                    d_col.metric("Solicitações/datas divergentes", d["solicitacoes_por_data_diferentes"])
+                    if resultado["iguais_no_criterio_comparado"]:
+                        st.success("Os valores e as chaves comparados coincidem. A fonte NÃO foi publicada.")
+                    else:
+                        st.warning("Existem divergências: manter o Excel até a investigação e homologação.")
+                    st.caption(resultado["criterio"])
+                    st.caption(resultado["observacao"])
 
     st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
     section_band(
