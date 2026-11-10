@@ -376,6 +376,39 @@ def integration_card(item: dict) -> str:
     )
 
 
+def mes_source_display(source: dict, mes_api: dict) -> dict:
+    """Distingue integração conectada da primeira publicação via MES.
+
+    A fonte histórica pode permanecer origin='MES'; isso não torna o
+    receptor integrado uma API 'planejada'. Porém não alegamos que houve
+    atualização automática antes de constar uma carga MES publicada.
+    """
+    published = (
+        str(source.get("origin") or "").upper() == "MES_GENERAL_REPORT_API"
+        or str(source.get("last_file_name") or "").casefold() == "relatoriogeral_mes.xlsx"
+    )
+    checked_ok = bool(
+        mes_api.get("active")
+        and (
+            mes_api.get("last_success_at")
+            or mes_api.get("http_status") == 200
+        )
+    )
+    connected = published or checked_ok
+    health = str(mes_api.get("status") or "").upper()
+    return {
+        "connected": connected,
+        "published": published,
+        "health": health,
+        "badge": "API INTEGRADA" if connected else "API CONFIGURADA",
+        "mode": "API AUTOMÁTICA · 07:20" if published
+                else "API CONECTADA · 07:20" if connected
+                else "API PROGRAMADA · 07:20",
+        "sync_label": "CARGA VIA API CONFIRMADA" if published
+                      else "PRIMEIRA CARGA VIA API PENDENTE",
+    }
+
+
 def source_card(source: dict) -> str:
     status = str(source.get("status") or "AGUARDANDO").upper()
     accent = (
