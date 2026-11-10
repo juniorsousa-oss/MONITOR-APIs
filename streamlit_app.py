@@ -517,10 +517,17 @@ def render_monitor() -> None:
                             )
                         )
                         st.session_state["_mes_homologacao_resumo"] = resumo
-                        if resumo.get("homologacao_bloqueada"):
+                        politica = resumo.get("politica_continuidade") or {}
+                        if politica.get("status") == "PROCESSAR_COM_RESSALVAS":
                             st.warning(
-                                "Coleta concluída. A homologação integral permanece BLOQUEADA "
-                                "pela existência de materiais sem código."
+                                "Coleta concluída COM RESSALVAS. Os registros válidos estão "
+                                "aptos ao processamento; as exceções seguem em quarentena. "
+                                "Esta tela não publica ou sincroniza o MRP."
+                            )
+                        elif politica.get("status") == "PROTEGER_BASE":
+                            st.error(
+                                "Falha estrutural ou volumétrica: manter a última base "
+                                "válida e investigar antes de atualizar."
                             )
                         else:
                             st.success("Comparação concluída — nenhuma fonte foi substituída.")
@@ -541,9 +548,9 @@ def render_monitor() -> None:
                     a2.metric("Pendências de dados", auditoria["registros_pendentes"])
                     a3.metric("Linhas completamente vazias", auditoria["registros_vazios"])
                     if auditoria["registros_pendentes"]:
-                        st.error(
-                            "HOMOLOGAÇÃO BLOQUEADA: registros sem identificação ou "
-                            "com campos inválidos. A API não substituirá o Excel."
+                        st.warning(
+                            "REGISTROS EM QUARENTENA: itens com inconsistências são "
+                            "isolados para correção; não são incluídos na demanda MRP."
                         )
                         if auditoria["sem_codigo_com_movimento"]:
                             st.warning(
@@ -582,6 +589,28 @@ def render_monitor() -> None:
                         )
                     else:
                         st.warning("As exceções entre API e referência não correspondem.")
+                politica = resultado.get("politica_continuidade") or {}
+                if politica:
+                    st.markdown("#### POLÍTICA DE CONTINUIDADE DA ATUALIZAÇÃO")
+                    status_operacional = politica["status"]
+                    if status_operacional == "PROCESSAR_COM_RESSALVAS":
+                        st.success(
+                            f'{politica["registros_validos"]:,} registros aptos ao processamento; '
+                            f'{politica["registros_em_quarentena"]:,} em quarentena para correção.'
+                        )
+                    elif status_operacional == "PROCESSAR":
+                        st.success("Dados estruturalmente aptos ao processamento.")
+                    else:
+                        st.error(
+                            "PROTEGER BASE ANTERIOR: anomalias volumosas ou estruturais "
+                            "exigem investigação."
+                        )
+                        for motivo in politica["motivos_protecao"]:
+                            st.caption(motivo)
+                    st.caption(
+                        "Avaliação técnica para futura sincronização. O Monitor "
+                        "continua em modo de homologação, sem publicar dados."
+                    )
                 if resultado.get("homologacao_bloqueada"):
                     st.caption(resultado["observacao"])
                 if resultado.get("api") and resultado.get("excel"):
@@ -599,9 +628,9 @@ def render_monitor() -> None:
                     )
                     if resultado.get("comparacao_parcial"):
                         st.warning(
-                            "COMPARAÇÃO PARCIAL: totais abaixo consideram somente registros "
-                            "com chaves válidas. Mesmo coincidindo, não autorizam a "
-                            "substituição do Relatório Geral."
+                            "COMPARAÇÃO COM RESSALVAS: totais abaixo consideram somente "
+                            "registros com chaves válidas. As exceções ficam em quarentena "
+                            "e não precisam impedir o processamento dos demais materiais."
                         )
                     tabela = pd.DataFrame([
                         {"Indicador": label, "API MES": base_mes[key],
