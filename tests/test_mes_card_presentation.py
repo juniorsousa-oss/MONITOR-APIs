@@ -56,6 +56,36 @@ class MesCardTests(unittest.TestCase):
             db_source,
         )
 
+    def test_mes_usa_a_mesma_estrutura_visual_dos_outros_cards(self):
+        source = (ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        card = next(
+            fn for fn in tree.body
+            if isinstance(fn, ast.FunctionDef)
+            and fn.name == "_render_mes_report_card"
+        )
+        card_code = ast.get_source_segment(source, card)
+        # Mesmo cabeçalho, chips e divisor do rodapé de source_card().
+        for selector in (
+            'class="source-top"',
+            'class="source-name"',
+            'class="source-meta"',
+            'class="source-badge"',
+            'class="source-origin"',
+            'class="source-apps mes-source-footer"',
+        ):
+            self.assertIn(selector, card_code)
+        self.assertNotIn("top, status_col = st.columns", card_code)
+        self.assertNotIn("info, action = st.columns", card_code)
+        self.assertIn('with st.popover(', card_code)
+
+    def test_estilo_ancora_botao_no_rodape_sem_deslocar_conteudo(self):
+        css = (ROOT / "ui.py").read_text(encoding="utf-8")
+        self.assertIn(".st-key-mes_general_source_card .mes-source-footer", css)
+        self.assertIn('[data-testid="stPopover"]', css)
+        self.assertIn("position:absolute!important", css)
+        self.assertIn("@media(max-width:600px)", css)
+
     def test_acao_e_renderizada_na_mesma_unidade_visual(self):
         source = (ROOT / "streamlit_app.py").read_text(encoding="utf-8")
         tree = ast.parse(source)

@@ -794,102 +794,97 @@ def _render_mes_report_card(source: dict, mes_api: dict) -> None:
         else "RECEPTOR OFFLINE" if health == "OFFLINE"
         else "RECEPTOR SEM VERIFICAÇÃO"
     )
+    # O texto principal usa exatamente a mesma estrutura HTML/CSS de todos
+    # os cartões de fonte; apenas o botão é um controle Streamlit nativo.
+    # Evita o deslocamento causado por duas linhas extras de st.columns.
     with st.container(border=True, key="mes_general_source_card"):
-        top, status_col = st.columns([4, 1], vertical_alignment="top")
-        with top:
-            st.markdown(
-                '<div class="source-name">RELATÓRIO GERAL</div>'
-                '<div class="source-meta">'
-                f'Última conferência: <b>{last_check}</b><br>'
-                f'Última mudança: <b>{last_change}</b><br>'
-                f'Registros: <b>{rows}</b> · Versão <b>{version}</b>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-        with status_col:
-            st.markdown(
-                f'<div class="source-badge">{esc(status)}</div>',
-                unsafe_allow_html=True,
-            )
+        pending_chip = (
+            '<span class="source-chip">PRIMEIRA CARGA VIA API PENDENTE</span>'
+            if state["connected"] and not state["published"] else ""
+        )
         st.markdown(
+            '<div class="source-top"><div>'
+            '<div class="source-name">RELATÓRIO GERAL</div>'
+            '<div class="source-meta">'
+            f'Última conferência: <b>{last_check}</b><br>'
+            f'Última mudança: <b>{last_change}</b><br>'
+            f'Registros: <b>{rows}</b> · Versão <b>{version}</b>'
+            '</div></div>'
+            f'<div class="source-badge">{esc(status)}</div></div>'
             '<div class="source-origin">'
             '<span class="source-chip">MES</span>'
             f'<span class="source-chip">{esc(state["mode"])}</span>'
             f'<span class="source-chip">{esc(state["badge"])}</span>'
             f'<span class="source-chip">{esc(health_chip)}</span>'
+            f'{pending_chip}'
+            '</div>'
+            '<div class="source-apps mes-source-footer">'
+            '<b>Usado por:</b> Conversor MRP · Gestão de Equipes'
             '</div>',
             unsafe_allow_html=True,
         )
-        info, action = st.columns([3.2, 1.25], vertical_alignment="center")
-        with info:
-            st.caption(
-                "Usado por: Conversor MRP · Gestão de Equipes"
+        with st.popover(
+            "↻ Reprocessar",
+            help="Consultar a API MES e publicar uma nova versão validada do Relatório Geral",
+            use_container_width=True,
+        ):
+            st.caption("Reprocessamento manual · somente Relatório Geral.")
+            key_config = os.getenv(
+                "SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", ""
             )
-            if not state["published"]:
-                st.caption("Aguardando a primeira publicação via API MES.")
-        with action:
-            with st.popover(
-                "↻ Reprocessar",
-                help="Consultar a API MES e publicar uma nova versão validada do Relatório Geral",
+            if len(key_config) < 12:
+                st.warning(
+                    "Configure o código privado de homologação em "
+                    "Streamlit Secrets para autorizar a atualização."
+                )
+            pin = st.text_input(
+                "Código privado de homologação",
+                type="password",
+                key="mes_reprocessamento_pin",
+            )
+            autorizado = (
+                len(key_config) >= 12
+                and hmac.compare_digest(pin, key_config)
+            )
+            if st.button(
+                "CONFIRMAR REPROCESSAMENTO",
+                key="mes_atualizar_agora",
+                disabled=not autorizado,
                 use_container_width=True,
             ):
-                st.caption("Reprocessamento manual · somente Relatório Geral.")
-                key_config = os.getenv(
-                    "SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", ""
-                )
-                if len(key_config) < 12:
-                    st.warning(
-                        "Configure o código privado de homologação em "
-                        "Streamlit Secrets para autorizar a atualização."
-                    )
-                pin = st.text_input(
-                    "Código privado de homologação",
-                    type="password",
-                    key="mes_reprocessamento_pin",
-                )
-                autorizado = (
-                    len(key_config) >= 12
-                    and hmac.compare_digest(pin, key_config)
-                )
-                if st.button(
-                    "CONFIRMAR REPROCESSAMENTO",
-                    key="mes_atualizar_agora",
-                    disabled=not autorizado,
-                    use_container_width=True,
-                ):
-                    from mes_general_report_sync import sincronizar_relatorio_geral
-                    with st.spinner("Validando e atualizando a fonte Relatório Geral..."):
-                        try:
-                            retorno = sincronizar_relatorio_geral()
-                            if retorno["status"] == "PROTEGER_BASE":
-                                msg = (
-                                    "Fonte anterior preservada: anomalias relevantes "
-                                    "na resposta MES. Nenhuma atualização publicada."
-                                )
-                                kind = "error"
-                            elif retorno.get("publicado"):
-                                msg = (
-                                    f'Nova versão publicada: {retorno["validos"]:,} '
-                                    f'registros válidos e {retorno["quarentena"]:,} '
-                                    "em quarentena. O Conversor MRP processará "
-                                    "a fonte no próximo ciclo."
-                                )
-                                kind = "success"
-                            else:
-                                msg = "Consulta concluída sem necessidade de nova versão."
-                                kind = "info"
-                        except Exception:
-                            kind = "error"
+                from mes_general_report_sync import sincronizar_relatorio_geral
+                with st.spinner("Validando e atualizando a fonte Relatório Geral..."):
+                    try:
+                        retorno = sincronizar_relatorio_geral()
+                        if retorno["status"] == "PROTEGER_BASE":
                             msg = (
-                                "A atualização não pôde ser concluída. Consulte "
-                                "o histórico técnico; a fonte anterior não deve "
-                                "ser substituída sem validação."
+                                "Fonte anterior preservada: anomalias relevantes "
+                                "na resposta MES. Nenhuma atualização publicada."
                             )
-                        st.session_state["mes_manual_result"] = {
-                            "kind": kind,
-                            "message": msg,
-                        }
-                        st.rerun()
+                            kind = "error"
+                        elif retorno.get("publicado"):
+                            msg = (
+                                f'Nova versão publicada: {retorno["validos"]:,} '
+                                f'registros válidos e {retorno["quarentena"]:,} '
+                                "em quarentena. O Conversor MRP processará "
+                                "a fonte no próximo ciclo."
+                            )
+                            kind = "success"
+                        else:
+                            msg = "Consulta concluída sem necessidade de nova versão."
+                            kind = "info"
+                    except Exception:
+                        kind = "error"
+                        msg = (
+                            "A atualização não pôde ser concluída. Consulte "
+                            "o histórico técnico; a fonte anterior não deve "
+                            "ser substituída sem validação."
+                        )
+                    st.session_state["mes_manual_result"] = {
+                        "kind": kind,
+                        "message": msg,
+                    }
+                    st.rerun()
         outcome = st.session_state.get("mes_manual_result")
         if outcome:
             kind = outcome.get("kind")
