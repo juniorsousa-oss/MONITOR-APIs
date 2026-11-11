@@ -1995,6 +1995,36 @@ def backfill_normalized_source(source_key: str) -> dict:
     )
 
 
+
+def _validar_lote_relatorio_geral(normalized: bytes) -> None:
+    """Impede publicação de Relatório Geral sem o lote usado nas baixas."""
+    try:
+        pack = json.loads(gzip.decompress(normalized).decode("utf-8"))
+        folhas = [
+            f for f in (pack.get("sheets") or [])
+            if isinstance(f, dict) and "geral" in str(f.get("name") or "").casefold()
+        ]
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        raise ValueError("RELATÓRIO GERAL: pacote normalizado inválido; fonte preservada.") from exc
+
+    for folha in folhas:
+        for row in (folha.get("rows") or [])[:26]:
+            if not isinstance(row, list):
+                continue
+            cabecalhos = {
+                re.sub(r"[^A-Z0-9]", "", str(cell or "").upper())
+                for cell in row
+            }
+            if "LOTE" in cabecalhos or "BATCH" in cabecalhos:
+                return
+
+    raise ValueError(
+        "RELATÓRIO GERAL sem coluna Lote (Batch da API MES). "
+        "A carga foi bloqueada ANTES da publicação; a versão anterior foi preservada. "
+        "Corrija a origem MES e execute Reprocessar no Monitor de APIs."
+    )
+
+
 def save_report(
     source_key: str,
     file_name: str,
@@ -2013,19 +2043,21 @@ def save_report(
     last_error: Exception | None = None
     committed: dict[str, Any] | None = None
 
-    # MOVIMENTAÇÃO possui layout operacional fixo. Valida antes de substituir
-    # a fonte corrente para impedir que um relatório tratado/incompatível
-    # sobrescreva o relatório padrão usado pelos indicadores.
+    # Valida fontes críticas ANTES do source_commit. Em especial, um Geral sem
+    # Batch/Lote impossibilita a Conferência de Baixas (OP + produto + lote).
     pre_normalized: bytes | None = None
     pre_normalized_rows = 0
-    if str(source_key).strip().lower() == "movimentacao":
+    source_kind = str(source_key).strip().lower()
+    if source_kind in {"movimentacao", "relatorio_geral"}:
         pre_normalized, pre_normalized_rows = build_normalized_source(
             source_key,
             file_name,
             raw,
         )
         if not pre_normalized:
-            raise ValueError("MOVIMENTAÇÃO não pôde ser normalizada.")
+            raise ValueError(f"{source_kind.upper()} não pôde ser normalizado.")
+        if source_kind == "relatorio_geral":
+            _validar_lote_relatorio_geral(pre_normalized)
 
     # 1) Salva imediatamente o original e registra a nova versão.
     for attempt in range(1, attempts + 1):
