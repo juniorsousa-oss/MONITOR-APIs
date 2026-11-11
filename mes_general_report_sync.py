@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from io import BytesIO
+import gzip
 import hashlib
 import json
 import os
@@ -116,6 +117,32 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
     )
     if not normalized or normalized_count <= 0:
         raise RuntimeError("Pré-validação do Excel técnico falhou.")
+
+    # Contrato de publicação também validado no formato que o FECHAMENTO
+    # lê de verdade (SETTA_SOURCE_V1). A presença de Batch na resposta
+    # MES não bastava: a planilha/normalização podiam omitir Lote.
+    try:
+        pack = json.loads(gzip.decompress(normalized).decode("utf-8"))
+        geral = next(
+            sheet for sheet in pack.get("sheets", [])
+            if str(sheet.get("name") or "").strip().casefold() == "geral"
+        )
+        linhas_geral = geral.get("rows") or []
+        cabecalho = linhas_geral[0] if linhas_geral else []
+    except (ValueError, TypeError, OSError, StopIteration, IndexError) as exc:
+        raise RuntimeError(
+            "Pré-validação falhou: Relatório Geral normalizado ilegível. "
+            "Nenhuma atualização foi publicada."
+        ) from exc
+    if (
+        "Lote" not in cabecalho or len(linhas_geral) != len(frame) + 1
+        or len(cabecalho) != len(COLS)
+    ):
+        raise RuntimeError(
+            "Pré-validação falhou: o Relatório Geral normalizado está "
+            "sem a coluna Lote ou com quantidade incorreta de linhas. "
+            "Fonte anterior preservada."
+        )
 
     return {
         "status": policy["status"],

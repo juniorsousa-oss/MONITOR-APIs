@@ -93,6 +93,37 @@ class IngestaoTests(unittest.TestCase):
         self.assertIn("Data de conferência", df.columns)
         self.assertEqual(df.columns[-1], "Lote")
 
+    def test_bloqueia_normalizado_sem_lote_antes_da_publicacao(self):
+        with patch(
+            "mes_general_report_sync.store.build_normalized_source",
+            return_value=(b"pacote_sem_cabecalho", 1),
+        ), patch("mes_general_report_sync.store.save_report") as save:
+            with self.assertRaisesRegex(
+                RuntimeError, "normalizado ilegível",
+            ):
+                preparar_carga_mes([registro(Batch="000001")], referencia=1)
+            save.assert_not_called()
+
+    def test_normalizado_possui_a_mesma_coluna_lote_da_planilha(self):
+        import gzip
+        from io import BytesIO
+        import pandas as pd
+        import json
+        from mes_general_report_sync import store
+        out = preparar_carga_mes(
+            [registro(Batch="000001"), registro(Code="00000442", Batch="061638")],
+            referencia=2,
+        )
+        normalized, total = store.build_normalized_source(
+            "relatorio_geral", "RelatorioGeral_MES.xlsx", out["arquivo"],
+        )
+        pack = json.loads(gzip.decompress(normalized).decode("utf-8"))
+        geral = next(x for x in pack["sheets"] if x["name"] == "Geral")
+        self.assertEqual(geral["rows"][0][-1], "Lote")
+        self.assertEqual(geral["rows"][1][-1], "000001")
+        self.assertEqual(geral["rows"][2][-1], "061638")
+        self.assertEqual(total, out["linhas_fonte"] + 2)
+
     def test_data_de_conferencia_invalida_entra_quarentena_sem_travar(self):
         sample = [registro() for _ in range(200)]
         sample.append(registro(ConferenceDate="data inválida"))
