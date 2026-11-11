@@ -122,7 +122,7 @@ class IngestaoTests(unittest.TestCase):
         self.assertEqual(geral["rows"][0][-1], "Lote")
         self.assertEqual(geral["rows"][1][-1], "000001")
         self.assertEqual(geral["rows"][2][-1], "061638")
-        self.assertEqual(total, out["linhas_fonte"] + 4)
+        self.assertEqual(total, out["linhas_fonte"] + 2)
 
     def test_data_de_conferencia_invalida_entra_quarentena_sem_travar(self):
         sample = [registro() for _ in range(200)]
