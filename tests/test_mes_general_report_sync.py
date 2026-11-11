@@ -73,6 +73,26 @@ class IngestaoTests(unittest.TestCase):
         faults = pd.read_excel(BytesIO(out["arquivo"]), sheet_name="Inconsistencias MES")
         self.assertEqual(len(faults), 1)
 
+    def test_api_batch_gera_coluna_lote_sem_perder_zeros_iniciais(self):
+        from io import BytesIO
+        import pandas as pd
+        sample = [
+            registro(Code="00000441", Batch="061638"),
+            registro(Code="00000442", Batch="000000000"),
+            registro(Code="00000443", Batch=None),
+        ]
+        out = preparar_carga_mes(sample, referencia=3)
+        self.assertEqual(out["status"], "PROCESSAR")
+        df = pd.read_excel(
+            BytesIO(out["arquivo"]), sheet_name="Geral", dtype={"Lote": str},
+        )
+        self.assertEqual(df["Lote"].iloc[0], "061638")
+        self.assertEqual(df["Lote"].iloc[1], "000000000")
+        self.assertTrue(pd.isna(df["Lote"].iloc[2]))
+        self.assertEqual(len(df), 3)
+        self.assertIn("Data de conferência", df.columns)
+        self.assertEqual(df.columns[-1], "Lote")
+
     def test_data_de_conferencia_invalida_entra_quarentena_sem_travar(self):
         sample = [registro() for _ in range(200)]
         sample.append(registro(ConferenceDate="data inválida"))
