@@ -30,6 +30,9 @@ COLS = [
     "Projeto", "Código", "Descrição", "Última solicitação",
     "Qtd. necessária", "Qtd. atendida", "Resp. separação",
     "Data de separação", "Resp. conferência", "Data de conferência",
+    # Campo MES Batch — necessário à Conferência de Baixas (OP + código + lote).
+    # Acrescentar ao final preserva a posição das colunas já consumidas.
+    "Lote",
 ]
 EXCEPTION_COLUMNS = [
     "Linha JSON", "Projeto informado", "Código informado", "Descrição",
@@ -75,6 +78,10 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
                 _quantidade(obj["AttendedQuantity"], "AttendedQuantity", indice),
                 valor("SeparationUser"), _dia(obj.get("SeparationDate")),
                 valor("ConferenceResponse"), _dia(obj.get("ConferenceDate")),
+                # Nunca reconstruir o lote por produto ou pela OP. A origem
+                # exclusiva do vínculo é Batch na API MES. O texto conserva
+                # zeros à esquerda (ex.: "061638").
+                "" if obj.get("Batch") is None else str(obj["Batch"]).strip(),
             ])
         elif any(v is not None and str(v).strip() for v in obj.values()):
             # NUNCA inserir exceções na aba Geral: o Conversor poderia
