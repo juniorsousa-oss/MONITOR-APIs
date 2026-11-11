@@ -15,6 +15,7 @@ on:
       - fix/mes-card-integrated-button-20261110
       - fix/mes-receptor-status-and-derived-version-20261110
       - fix/mes-card-layout-alignment-20261110
+      - fix/mes-preservar-batch-relatorio-geral-20261111
     paths:
       - mes_general_report.py
       - mes_general_report_validation.py
