@@ -22,7 +22,7 @@ import data_store as store
 from mes_general_report import URL, TOKEN_ENV
 from mes_general_report_validation import (
     _download_limited, _mes_records, _dia, _quantidade,
-    auditar_registros_mes, avaliar_continuidade_mes,
+    auditar_registros_mes, avaliar_continuidade_mes, _em_branco,
 )
 
 SOURCE_KEY = "relatorio_geral"
@@ -31,8 +31,10 @@ COLS = [
     "Projeto", "Código", "Descrição", "Última solicitação",
     "Qtd. necessária", "Qtd. atendida", "Resp. separação",
     "Data de separação", "Resp. conferência", "Data de conferência",
-    # Campo MES Batch — necessário à Conferência de Baixas (OP + código + lote).
-    # Acrescentar ao final preserva a posição das colunas já consumidas.
+    # Layout 16/11: pendencia de CADA registro/lote (nao saldo cumulativo).
+    # Caso o JSON nao envie pendencia explicita, calcula-se a diferenca
+    # usando os dois campos MES auditados. Preserva Lote como ultima coluna.
+    "Qtd. pendências",
     "Lote",
 ]
 EXCEPTION_COLUMNS = [
@@ -66,22 +68,41 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
     ids_validos = {id(x) for x in validos}
     linhas = []
     excecoes = []
+    pendencias_da_api = 0
+    pendencias_calculadas = 0
 
     for indice, obj in enumerate(registros, 1):
         def valor(key):
             return str(obj.get(key) or "").strip()
 
         if id(obj) in ids_validos:
+            necessaria = _quantidade(obj["NecessaryQuantity"], "NecessaryQuantity", indice)
+            atendida = _quantidade(obj["AttendedQuantity"], "AttendedQuantity", indice)
+            calculada = necessaria - atendida
+            if calculada < -0.000001:
+                raise ValueError("MES retornou atendimento maior que necessidade em registro validado.")
+            chaves_pendencia = [
+                chave for chave in ("PendingQuantity", "Pending", "RemainingQuantity")
+                if chave in obj and not _em_branco(obj.get(chave))
+            ]
+            if chaves_pendencia:
+                pendencia = _quantidade(obj[chaves_pendencia[0]], chaves_pendencia[0], indice)
+                if abs(pendencia - calculada) > 0.000001:
+                    raise ValueError("MES retornou pendencia divergente em registro validado.")
+                pendencias_da_api += 1
+            else:
+                # Derivacao declarada: o contrato novo garante N - A = P
+                # por linha. Nao usar a ultima pendencia de outra linha/lote.
+                pendencia = round(max(0.0, calculada), 6)
+                pendencias_calculadas += 1
             linhas.append([
                 valor("OP"), valor("Code"), valor("Description"),
                 _dia(obj.get("LastRequest")),
-                _quantidade(obj["NecessaryQuantity"], "NecessaryQuantity", indice),
-                _quantidade(obj["AttendedQuantity"], "AttendedQuantity", indice),
+                necessaria, atendida,
                 valor("SeparationUser"), _dia(obj.get("SeparationDate")),
                 valor("ConferenceResponse"), _dia(obj.get("ConferenceDate")),
-                # Nunca reconstruir o lote por produto ou pela OP. A origem
-                # exclusiva do vínculo é Batch na API MES. O texto conserva
-                # zeros à esquerda (ex.: "061638").
+                pendencia,
+                # Lote somente de Batch. Preservar zeros à esquerda.
                 "" if obj.get("Batch") is None else str(obj["Batch"]).strip(),
             ])
         elif any(v is not None and str(v).strip() for v in obj.values()):
@@ -135,14 +156,30 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
             "Nenhuma atualização foi publicada."
         ) from exc
     if (
-        "Lote" not in cabecalho or len(linhas_geral) != len(frame) + 1
-        or len(cabecalho) != len(COLS)
+        "Lote" not in cabecalho or "Qtd. pendências" not in cabecalho
+        or len(linhas_geral) != len(frame) + 1 or len(cabecalho) != len(COLS)
     ):
         raise RuntimeError(
             "Pré-validação falhou: o Relatório Geral normalizado está "
-            "sem a coluna Lote ou com quantidade incorreta de linhas. "
+            "sem Lote/Pendências ou com quantidade incorreta de linhas. "
             "Fonte anterior preservada."
         )
+
+    # Conferencia no artefato NORMALIZADO, exatamente como o Conversor
+    # MRP o consumira. A validacao e feita antes de salvar nova versao.
+    idx_n = cabecalho.index("Qtd. necessária")
+    idx_a = cabecalho.index("Qtd. atendida")
+    idx_p = cabecalho.index("Qtd. pendências")
+    for numero, linha in enumerate(linhas_geral[1:], 2):
+        if len(linha) != len(cabecalho):
+            raise RuntimeError("Relatório Geral normalizado com linha incompleta; fonte preservada.")
+        n, a, p = (
+            _quantidade(linha[idx_n], "Qtd. necessária", numero),
+            _quantidade(linha[idx_a], "Qtd. atendida", numero),
+            _quantidade(linha[idx_p], "Qtd. pendências", numero),
+        )
+        if a > n + 0.000001 or abs((n - a) - p) > 0.000001:
+            raise RuntimeError("Relatório Geral normalizado com pendências divergentes; fonte preservada.")
 
     return {
         "status": policy["status"],
@@ -151,6 +188,8 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
         "arquivo": arquivo,
         "linhas_fonte": len(frame),
         "linhas_excecao": len(excecoes),
+        "pendencias_api": pendencias_da_api,
+        "pendencias_calculadas": pendencias_calculadas,
         "sha256": hashlib.sha256(arquivo).hexdigest(),
     }
 
@@ -190,6 +229,8 @@ def sincronizar_relatorio_geral(*, session=None, dry_run=False):
         "recebidos": audit["total_recebido"],
         "validos": audit["registros_validos"],
         "quarentena": audit["registros_pendentes"],
+        "pendencias_api": prepared.get("pendencias_api", 0),
+        "pendencias_calculadas": prepared.get("pendencias_calculadas", 0),
         "motivos_protecao": prepared["politica"]["motivos_protecao"],
         "publicado": False,
     }
