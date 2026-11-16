@@ -154,6 +154,28 @@ def auditar_registros_mes(payload):
             except ValueError:
                 motivos.add("QUANTIDADE_INVALIDA")
                 quantidades.append(None)
+        # Novo contrato MES (16/11): cada linha/lote expressa sua propria
+        # necessidade, atendimento e pendencia. Nunca publicar registros
+        # incoerentes como se fossem validos.
+        if all(q is not None for q in quantidades):
+            necessaria, atendida = quantidades
+            if atendida > necessaria + 0.000001:
+                motivos.add("ATENDIMENTO_SUPERIOR_NECESSIDADE")
+            presentes = [
+                nome for nome in ("PendingQuantity", "Pending", "RemainingQuantity")
+                if nome in obj and not _em_branco(obj.get(nome))
+            ]
+            if presentes:
+                try:
+                    pendencias = [
+                        _quantidade(obj[nome], nome, indice) for nome in presentes
+                    ]
+                except ValueError:
+                    motivos.add("PENDENCIA_INVALIDA")
+                else:
+                    if any(abs(p - (necessaria - atendida)) > 0.000001
+                           for p in pendencias):
+                        motivos.add("PENDENCIA_DIVERGENTE")
         movimento = any(q is not None and q > 0 for q in quantidades)
         if codigo_vazio and movimento:
             com_movimento_sem_codigo += 1
