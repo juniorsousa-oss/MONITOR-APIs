@@ -5,6 +5,11 @@ on:
     # GitHub Actions pode iniciar com atraso; não há garantia de minuto exato.
     - cron: '20 10 * * *'
   workflow_dispatch:
+  # Ao homologar mudanças na integração MES em main, republicar a fonte
+  # somente após os testes de contrato terem concluído com sucesso.
+  workflow_run:
+    workflows: ["Validar integração MES GeneralReport"]
+    types: [completed]
 concurrency:
   group: setta-mes-generalreport-source
   cancel-in-progress: false
@@ -12,6 +17,12 @@ permissions:
   contents: read
 jobs:
   update-generalreport:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
