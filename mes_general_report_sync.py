@@ -171,8 +171,11 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
     idx_a = cabecalho.index("Qtd. atendida")
     idx_p = cabecalho.index("Qtd. pendências")
     for numero, linha in enumerate(linhas_geral[1:], 2):
-        if len(linha) != len(cabecalho):
-            raise RuntimeError("Relatório Geral normalizado com linha incompleta; fonte preservada.")
+        # A camada SETTA_SOURCE_V1 suprime células vazias ao final da
+        # linha (por exemplo Batch vazio), sem alterar as colunas internas.
+        # K deve existir na posição correta; Lote vazio pode estar ausente.
+        if len(linha) <= idx_p or len(linha) > len(cabecalho):
+            raise RuntimeError("Relatório Geral normalizado sem coluna de pendências por linha; fonte preservada.")
         n, a, p = (
             _quantidade(linha[idx_n], "Qtd. necessária", numero),
             _quantidade(linha[idx_a], "Qtd. atendida", numero),
