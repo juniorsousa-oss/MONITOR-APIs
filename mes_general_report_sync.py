@@ -49,6 +49,8 @@ TZ = ZoneInfo("America/Sao_Paulo")
 
 # Alias explícitos do campo X; nunca confundir com valor da carga ou custo.
 PRECO_MINIMO_CAMPOS = (
+    # Nome real confirmado no JSON da API MES em 18/11/2026.
+    "Minimum_Value_Found",
     "MinimumValueFound", "MinimumFoundValue", "MinimumValue",
     "MinimumPriceFound", "MinimumPrice", "MinPrice",
     "LowestPrice", "LowestPriceValue", "MinValueFound",
