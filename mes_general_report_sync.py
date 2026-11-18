@@ -34,6 +34,9 @@ COLS = [
     # Layout 16/11: pendencia de CADA registro/lote (nao saldo cumulativo).
     # Caso o JSON nao envie pendencia explicita, calcula-se a diferenca
     # usando os dois campos MES auditados. Preserva Lote como ultima coluna.
+    # O valor minimo encontrado pode ainda estar indisponivel na API MES.
+    # Sempre manter a coluna no Excel, mesmo sem preço válido.
+    "Valor mínimo encontrado",
     "Qtd. pendências",
     "Lote",
 ]
@@ -43,6 +46,35 @@ EXCEPTION_COLUMNS = [
     "Motivo", "Status",
 ]
 TZ = ZoneInfo("America/Sao_Paulo")
+
+# Alias explícitos do campo X; nunca confundir com valor da carga ou custo.
+PRECO_MINIMO_CAMPOS = (
+    "MinimumValueFound", "MinimumFoundValue", "MinimumValue",
+    "MinimumPriceFound", "MinimumPrice", "MinPrice",
+    "LowestPrice", "LowestPriceValue", "MinValueFound",
+    "ValorMinimoEncontrado", "ValorMinimo", "Valor mínimo encontrado",
+)
+
+
+def _valor_minimo_mes(registro: dict, indice: int) -> tuple[float | None, str | None]:
+    """Converte somente campo identificável de preço; ausência não significa zero.
+
+    Retorna (valor, nome-do-campo). Valor zero indica que o MES não tem
+    cotação válida, mas permanece fiel ao valor informado na origem.
+    """
+    campos = {
+        str(chave).casefold().replace("_", "").replace(" ", ""): chave
+        for chave in registro
+    }
+    for alias in PRECO_MINIMO_CAMPOS:
+        chave = campos.get(alias.casefold().replace("_", "").replace(" ", ""))
+        if chave is None or _em_branco(registro.get(chave)):
+            continue
+        try:
+            return _quantidade(registro[chave], chave, indice), str(chave)
+        except ValueError:
+            return None, str(chave)
+    return None, None
 
 
 def _source_status():
@@ -70,6 +102,10 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
     excecoes = []
     pendencias_da_api = 0
     pendencias_calculadas = 0
+    precos_validos = 0
+    precos_positivos = 0
+    precos_invalidos = 0
+    campos_de_preco = set()
 
     for indice, obj in enumerate(registros, 1):
         def valor(key):
@@ -95,12 +131,21 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
                 # por linha. Nao usar a ultima pendencia de outra linha/lote.
                 pendencia = round(max(0.0, calculada), 6)
                 pendencias_calculadas += 1
+            preco, campo_preco = _valor_minimo_mes(obj, indice)
+            if campo_preco:
+                campos_de_preco.add(campo_preco)
+                if preco is None:
+                    precos_invalidos += 1
+                else:
+                    precos_validos += 1
+                    precos_positivos += int(preco > 0)
             linhas.append([
                 valor("OP"), valor("Code"), valor("Description"),
                 _dia(obj.get("LastRequest")),
                 necessaria, atendida,
                 valor("SeparationUser"), _dia(obj.get("SeparationDate")),
                 valor("ConferenceResponse"), _dia(obj.get("ConferenceDate")),
+                preco,
                 pendencia,
                 # Lote somente de Batch. Preservar zeros à esquerda.
                 "" if obj.get("Batch") is None else str(obj["Batch"]).strip(),
@@ -157,6 +202,7 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
         ) from exc
     if (
         "Lote" not in cabecalho or "Qtd. pendências" not in cabecalho
+        or "Valor mínimo encontrado" not in cabecalho
         or len(linhas_geral) != len(frame) + 1 or len(cabecalho) != len(COLS)
     ):
         raise RuntimeError(
@@ -169,6 +215,7 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
     # MRP o consumira. A validacao e feita antes de salvar nova versao.
     idx_n = cabecalho.index("Qtd. necessária")
     idx_a = cabecalho.index("Qtd. atendida")
+    idx_preco = cabecalho.index("Valor mínimo encontrado")
     idx_p = cabecalho.index("Qtd. pendências")
     for numero, linha in enumerate(linhas_geral[1:], 2):
         # A camada SETTA_SOURCE_V1 suprime células vazias ao final da
@@ -183,6 +230,9 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
         )
         if a > n + 0.000001 or abs((n - a) - p) > 0.000001:
             raise RuntimeError("Relatório Geral normalizado com pendências divergentes; fonte preservada.")
+        preco = linha[idx_preco] if len(linha) > idx_preco else None
+        if preco is not None and str(preco).strip():
+            _quantidade(preco, "Valor mínimo encontrado", numero)
 
     return {
         "status": policy["status"],
@@ -193,6 +243,10 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
         "linhas_excecao": len(excecoes),
         "pendencias_api": pendencias_da_api,
         "pendencias_calculadas": pendencias_calculadas,
+        "precos_validos": precos_validos,
+        "precos_positivos": precos_positivos,
+        "precos_invalidos": precos_invalidos,
+        "campos_preco": sorted(campos_de_preco),
         "sha256": hashlib.sha256(arquivo).hexdigest(),
     }
 
@@ -234,6 +288,10 @@ def sincronizar_relatorio_geral(*, session=None, dry_run=False):
         "quarentena": audit["registros_pendentes"],
         "pendencias_api": prepared.get("pendencias_api", 0),
         "pendencias_calculadas": prepared.get("pendencias_calculadas", 0),
+        "precos_validos": prepared.get("precos_validos", 0),
+        "precos_positivos": prepared.get("precos_positivos", 0),
+        "precos_invalidos": prepared.get("precos_invalidos", 0),
+        "campos_preco": prepared.get("campos_preco", []),
         "motivos_protecao": prepared["politica"]["motivos_protecao"],
         "publicado": False,
     }
