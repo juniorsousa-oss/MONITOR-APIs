@@ -842,9 +842,20 @@ def _render_mes_report_card(source: dict, mes_api: dict) -> None:
                 type="password",
                 key="mes_reprocessamento_pin",
             )
+            # O segredo de homologação não é a credencial MES. No Streamlit
+            # o token deve existir neste próprio executor, independentemente
+            # do ambiente de GitHub Actions da atualização programada.
+            tem_token_mes = bool(os.getenv("SETTA_MES_GENERAL_REPORT_TOKEN", "").strip())
+            if not tem_token_mes:
+                st.warning(
+                    "A credencial MES não está configurada neste ambiente "
+                    "(Streamlit). A atualização agendada pode continuar funcionando, "
+                    "mas o reprocessamento manual precisa de credencial própria."
+                )
             autorizado = (
                 len(key_config) >= 12
                 and hmac.compare_digest(pin, key_config)
+                and tem_token_mes
             )
             if st.button(
                 "CONFIRMAR REPROCESSAMENTO",
@@ -873,12 +884,22 @@ def _render_mes_report_card(source: dict, mes_api: dict) -> None:
                         else:
                             msg = "Consulta concluída sem necessidade de nova versão."
                             kind = "info"
-                    except Exception:
+                    except Exception as exc:
+                        from mes_sync_diagnostics import diagnosticar_erro_mes
+                        diagnostico = diagnosticar_erro_mes(exc)
                         kind = "error"
                         msg = (
-                            "A atualização não pôde ser concluída. Consulte "
-                            "o histórico técnico; a fonte anterior não deve "
-                            "ser substituída sem validação."
+                            "A atualização não pôde ser concluída. "
+                            + diagnostico["orientacao"]
+                            + " Código técnico: " + diagnostico["codigo"] + "."
+                        )
+                        # Somente categoria e classe; não registrar str(exc)
+                        # pois erros HTTP podem conter informações sensíveis.
+                        print(
+                            "MES_REPROCESSAMENTO_MANUAL"
+                            f" codigo={diagnostico['codigo']}"
+                            f" classe={type(exc).__name__}",
+                            flush=True,
                         )
                     st.session_state["mes_manual_result"] = {
                         "kind": kind,
