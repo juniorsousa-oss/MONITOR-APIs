@@ -94,6 +94,35 @@ class ContratoPendenciaLinhaTests(unittest.TestCase):
         self.assertEqual(out["status"], "PROTEGER_BASE")
         self.assertIsNone(out["arquivo"])
 
+    def test_coluna_x_valor_minimo_quando_mes_informa(self):
+        out = preparar_carga_mes([
+            registro(MinimumValueFound=17.35, Batch="000000008")
+        ], referencia=1)
+        self.assertEqual(out["status"], "PROCESSAR")
+        self.assertEqual(out["precos_validos"], 1)
+        self.assertEqual(out["precos_positivos"], 1)
+        self.assertEqual(out["campos_preco"], ["MinimumValueFound"])
+        df = pd.read_excel(BytesIO(out["arquivo"]), sheet_name="Geral")
+        self.assertEqual(df["Valor mínimo encontrado"].iloc[0], 17.35)
+
+    def test_coluna_x_ausente_nao_inventa_preco(self):
+        out = preparar_carga_mes([
+            registro(Batch="000000008")
+        ], referencia=1)
+        self.assertEqual(out["precos_validos"], 0)
+        df = pd.read_excel(BytesIO(out["arquivo"]), sheet_name="Geral")
+        self.assertTrue(pd.isna(df["Valor mínimo encontrado"].iloc[0]))
+        self.assertEqual(df["Qtd. necessária"].iloc[0], 2)
+
+    def test_preco_invalido_nao_remove_necessidade(self):
+        out = preparar_carga_mes([
+            registro(MinimumValueFound="-25", Batch="000000008")
+        ], referencia=1)
+        self.assertEqual(out["precos_invalidos"], 1)
+        self.assertEqual(out["linhas_fonte"], 1)
+        df = pd.read_excel(BytesIO(out["arquivo"]), sheet_name="Geral")
+        self.assertTrue(pd.isna(df["Valor mínimo encontrado"].iloc[0]))
+
     def test_normalizado_contem_pendencias_e_lote_sem_perda(self):
         out = preparar_carga_mes([
             registro(NecessaryQuantity=2, AttendedQuantity=1,
