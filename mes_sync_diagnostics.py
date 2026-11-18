@@ -14,7 +14,7 @@ def diagnosticar_erro_mes(exc: Exception) -> dict[str, str]:
         return {"codigo": "MES_CREDENCIAL_STREAMLIT",
                 "orientacao": "A credencial MES não está configurada neste aplicativo. A execução agendada pode utilizar outro ambiente."}
     if "consulta retornou http" in texto:
-        status = re.search(r"\\bhttp\\s+(\\d{3})\\b", texto)
+        status = re.search(r"\bhttp\s+(\d{3})\b", texto)
         code = status.group(1) if status else "ERRO"
         return {"codigo": f"MES_HTTP_{code}",
                 "orientacao": "A API MES recusou a requisição. Consulte o estado do serviço."}
