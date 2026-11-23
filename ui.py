@@ -110,8 +110,9 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 
 .source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem;margin:.3rem 0 1rem}
 .source-card{position:relative;background:#fff;border:1px solid #dfe3e8;border-radius:12px;padding:.95rem 1rem;box-shadow:0 3px 12px rgba(15,23,42,.035);overflow:hidden;min-height:145px}
-/* O card MES utiliza exatamente o grid visual dos demais cartões HTML.
-   A única peça nativa é o popover, ancorado no canto direito do rodapé. */
+/* O card MES agora possui ação nativa sem PIN e estados em duas etapas.
+   Controles em fluxo normal: a mensagem de progresso não pode sobrepor botão
+   ou cortar o rodapé em desktop/mobile. */
 .st-key-mes_general_source_card{
   position:relative!important;
   min-height:145px!important;
@@ -125,31 +126,19 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 .st-key-mes_general_source_card .source-meta{line-height:1.55}
 .st-key-mes_general_source_card .source-origin{margin-top:.45rem;margin-bottom:0}
 .st-key-mes_general_source_card .source-apps{margin-top:.65rem;padding-top:.55rem}
-.st-key-mes_general_source_card .mes-source-footer{padding-right:9.1rem;min-height:1.45rem}
-.st-key-mes_general_source_card [data-testid="stPopover"]{
-  position:absolute!important;
-  right:.85rem!important;
-  bottom:.6rem!important;
-  z-index:3;
-  width:auto!important;
-  max-width:9rem;
-}
-.st-key-mes_general_source_card [data-testid="stPopover"] button{
-  width:auto!important;
-  min-height:1.7rem!important;
-  height:1.7rem!important;
-  padding:.17rem .52rem!important;
-  font-size:.65rem!important;
-  white-space:nowrap;
+.st-key-mes_general_source_card .mes-source-footer{min-height:1.45rem}
+.st-key-mes_general_source_card [data-testid="stButton"] button{
+  width:100%!important;
+  min-height:2.1rem!important;
+  margin-top:.4rem!important;
+  padding:.3rem .6rem!important;
+  font-size:.72rem!important;
+  font-weight:800!important;
 }
 @media(max-width:600px){
-  .st-key-mes_general_source_card .mes-source-footer{padding-right:0}
-  .st-key-mes_general_source_card [data-testid="stPopover"]{
-    position:relative!important;
-    right:auto!important;
-    bottom:auto!important;
-    margin-top:.45rem;
-    margin-left:auto;
+  .st-key-mes_general_source_card [data-testid="stButton"] button{
+    font-size:.68rem!important;
+    white-space:normal!important;
   }
 }
 .source-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--source-accent,#111827)}
