@@ -51,11 +51,68 @@ from streamlit_autorefresh import st_autorefresh
 
 import data_store as store
 import monitor_logic as monitor
+from mes_refresh_flow import ManualRefreshGuard, estado_relatorio_tratado
 from ui import api_card, derived_card, inject_css, kpi_grid, logo_html, section_band, source_card
 import ui as ui_components
 
 TZ = ZoneInfo("America/Sao_Paulo")
 VISUAL_CONFIG = store.load_visual_config()
+
+
+@st.cache_resource
+def _mes_manual_guard() -> ManualRefreshGuard:
+    """Uma sincronização MES por vez e intervalo mínimo entre tentativas."""
+    return ManualRefreshGuard(cooldown_seconds=120)
+
+
+@st.fragment(run_every="15s")
+def _mes_await_derived():
+    """Acompanha o Conversor sem repetir GET à MES nem bloquear a interface."""
+    expected = int(st.session_state.get("_mes_pending_version") or 0)
+    if not expected:
+        return
+    try:
+        base = next(
+            (x for x in store.list_derived_bases()
+             if x.get("key") == "relatorio_geral_tratado"), {},
+        )
+        source = next(
+            (x for x in store.list_sources()
+             if x.get("source_key") == "relatorio_geral"), {},
+        )
+        current_source = int(source.get("version") or expected)
+        desired = max(expected, current_source)
+        status, treated = estado_relatorio_tratado(desired, base)
+    except Exception:
+        st.warning(
+            "A fonte foi publicada, mas ainda não foi possível consultar "
+            "a conclusão do Conversor MRP. Não é necessário reprocessar."
+        )
+        return
+
+    if status == "CONCLUIDO":
+        st.session_state["_mes_pending_version"] = 0
+        st.session_state["mes_manual_result"] = {
+            "kind": "success",
+            "message": (
+                f"Atualização completa: Relatório Geral v{desired} e "
+                f"Tratado v{treated} sincronizados. Apenas uma consulta MES."
+            ),
+        }
+        st.rerun()
+    elif status == "ERRO_CONVERSOR":
+        st.error(
+            f"Relatório Geral v{desired} publicado, mas o Conversor MRP "
+            f"não concluiu (Tratado v{treated}). Verifique o processamento; "
+            "reconsultar a MES não corrigirá esse erro."
+        )
+    else:
+        st.info(
+            f"Etapa 1/2: fonte MES v{desired} publicada. "
+            f"Etapa 2/2: aguardando Relatório Geral Tratado (v{treated}). "
+            "Atualização automática desta mensagem a cada 15 s; "
+            "não clique em Reprocessar novamente."
+        )
 
 
 def browser_icon():
@@ -778,7 +835,7 @@ def render_monitor() -> None:
         st.success("Nenhum incidente registrado.")
 
 
-def _render_mes_report_card(source: dict, mes_api: dict) -> None:
+def _render_mes_report_card(source: dict, mes_api: dict, treated_base: dict | None = None) -> None:
     """Cartão da fonte MES com ação real de reprocessamento no próprio cartão."""
     state = ui_components.mes_source_display(source, mes_api)
     esc = ui_components.esc
@@ -823,89 +880,92 @@ def _render_mes_report_card(source: dict, mes_api: dict) -> None:
             '</div>',
             unsafe_allow_html=True,
         )
-        with st.popover(
-            "↻ Reprocessar",
-            help="Consultar a API MES e publicar uma nova versão validada do Relatório Geral",
+        treated_base = treated_base or {}
+        phase, treated_ver = estado_relatorio_tratado(version, treated_base)
+        if phase != "CONCLUIDO":
+            st.warning(
+                f"Fonte v{version} recebida, mas Tratado v{treated_ver} "
+                "ainda não está sincronizado. Aguarde o Conversor MRP."
+            )
+        else:
+            st.caption(f"Fonte e Relatório Geral Tratado sincronizados: v{version}.")
+
+        # Sem PIN de homologação adicional. O token MES continua exclusivo
+        # do servidor; aplica-se bloqueio de concorrência e intervalo mínimo
+        # para evitar consultas duplicadas em uma instância pública.
+        tem_token_mes = bool(os.getenv("SETTA_MES_GENERAL_REPORT_TOKEN", "").strip())
+        if not tem_token_mes:
+            st.warning(
+                "A credencial MES não está disponível neste servidor Streamlit. "
+                "A atualização automática via GitHub continua independente."
+            )
+        if st.button(
+            "↻ REPROCESSAR AGORA",
+            key="mes_atualizar_agora",
+            disabled=not tem_token_mes,
             use_container_width=True,
+            help="Uma consulta à MES; o Relatório Geral Tratado atualiza depois automaticamente.",
         ):
-            st.caption("Reprocessamento manual · somente Relatório Geral.")
-            key_config = os.getenv(
-                "SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", ""
-            )
-            if len(key_config) < 12:
-                st.warning(
-                    "Configure o código privado de homologação em "
-                    "Streamlit Secrets para autorizar a atualização."
+            gate = _mes_manual_guard()
+            allowed, gate_reason = gate.begin()
+            if not allowed:
+                msg = (
+                    "Já existe uma consulta MES em execução. Aguarde a atualização."
+                    if gate_reason == "EM_EXECUCAO" else
+                    "Uma consulta MES acabou de ser executada. Aguarde o Conversor "
+                    "MRP e a atualização automática da tela; não há necessidade "
+                    "de repetir a operação."
                 )
-            pin = st.text_input(
-                "Código privado de homologação",
-                type="password",
-                key="mes_reprocessamento_pin",
-            )
-            # O segredo de homologação não é a credencial MES. No Streamlit
-            # o token deve existir neste próprio executor, independentemente
-            # do ambiente de GitHub Actions da atualização programada.
-            tem_token_mes = bool(os.getenv("SETTA_MES_GENERAL_REPORT_TOKEN", "").strip())
-            if not tem_token_mes:
-                st.warning(
-                    "A credencial MES não está configurada neste ambiente "
-                    "(Streamlit). A atualização agendada pode continuar funcionando, "
-                    "mas o reprocessamento manual precisa de credencial própria."
-                )
-            autorizado = (
-                len(key_config) >= 12
-                and hmac.compare_digest(pin, key_config)
-                and tem_token_mes
-            )
-            if st.button(
-                "CONFIRMAR REPROCESSAMENTO",
-                key="mes_atualizar_agora",
-                disabled=not autorizado,
-                use_container_width=True,
-            ):
+                kind = "info"
+            else:
                 from mes_general_report_sync import sincronizar_relatorio_geral
-                with st.spinner("Validando e atualizando a fonte Relatório Geral..."):
-                    try:
+                try:
+                    with st.spinner("Etapa 1/2: consultando MES e publicando fonte..."):
                         retorno = sincronizar_relatorio_geral()
-                        if retorno["status"] == "PROTEGER_BASE":
-                            msg = (
-                                "Fonte anterior preservada: anomalias relevantes "
-                                "na resposta MES. Nenhuma atualização publicada."
-                            )
-                            kind = "error"
-                        elif retorno.get("publicado"):
-                            msg = (
-                                f'Nova versão publicada: {retorno["validos"]:,} '
-                                f'registros válidos e {retorno["quarentena"]:,} '
-                                "em quarentena. O Conversor MRP processará "
-                                "a fonte no próximo ciclo."
-                            )
-                            kind = "success"
-                        else:
-                            msg = "Consulta concluída sem necessidade de nova versão."
-                            kind = "info"
-                    except Exception as exc:
-                        from mes_sync_diagnostics import diagnosticar_erro_mes
-                        diagnostico = diagnosticar_erro_mes(exc)
-                        kind = "error"
+                    if retorno["status"] == "PROTEGER_BASE":
                         msg = (
-                            "A atualização não pôde ser concluída. "
-                            + diagnostico["orientacao"]
-                            + " Código técnico: " + diagnostico["codigo"] + "."
+                            "Fonte anterior preservada: a resposta MES não passou "
+                            "na validação de integridade."
                         )
-                        # Somente categoria e classe; não registrar str(exc)
-                        # pois erros HTTP podem conter informações sensíveis.
-                        print(
-                            "MES_REPROCESSAMENTO_MANUAL"
-                            f" codigo={diagnostico['codigo']}"
-                            f" classe={type(exc).__name__}",
-                            flush=True,
+                        kind = "error"
+                    else:
+                        source_version = int(
+                            retorno.get("versao") or source.get("version") or 0
                         )
-                    st.session_state["mes_manual_result"] = {
-                        "kind": kind,
-                        "message": msg,
-                    }
-                    st.rerun()
+                        st.session_state["_mes_pending_version"] = source_version
+                        msg = (
+                            f'Consulta MES concluída ({retorno.get("validos", 0):,} '
+                            "registros válidos). Fonte publicada; o Monitor "
+                            "acompanhará automaticamente o Relatório Geral Tratado."
+                            if retorno.get("publicado") else
+                            "Consulta MES concluída sem alteração. "
+                            "Conferindo se o Relatório Geral Tratado está atualizado."
+                        )
+                        kind = "info"
+                except Exception as exc:
+                    from mes_sync_diagnostics import diagnosticar_erro_mes
+                    diagnostico = diagnosticar_erro_mes(exc)
+                    kind = "error"
+                    msg = (
+                        "Falha na atualização: " + diagnostico["orientacao"]
+                        + " Código técnico: " + diagnostico["codigo"] + "."
+                    )
+                    print(
+                        "MES_REPROCESSAMENTO_MANUAL"
+                        f" codigo={diagnostico['codigo']}"
+                        f" classe={type(exc).__name__}",
+                        flush=True,
+                    )
+                finally:
+                    # Evitar duas consultas seguidas que só geram versões
+                    # intermediárias enquanto o Conversor ainda trabalha.
+                    gate.finish(success=True)
+            st.session_state["mes_manual_result"] = {
+                "kind": kind, "message": msg,
+            }
+            st.rerun()
+        if st.session_state.get("_mes_pending_version"):
+            _mes_await_derived()
         outcome = st.session_state.get("mes_manual_result")
         if outcome:
             kind = outcome.get("kind")
@@ -1056,7 +1116,10 @@ def render_database() -> None:
         for offset, source in enumerate(normalized[position:position + 2]):
             with cols[offset]:
                 if source.get("source_key") == "relatorio_geral":
-                    _render_mes_report_card(source, mes_receptor)
+                    _render_mes_report_card(
+                        source, mes_receptor,
+                        next((x for x in derived if x.get("key") == "relatorio_geral_tratado"), {})
+                    )
                 else:
                     st.markdown(
                         source_card(source),
