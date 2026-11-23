@@ -73,6 +73,17 @@ class IngestaoTests(unittest.TestCase):
         faults = pd.read_excel(BytesIO(out["arquivo"]), sheet_name="Inconsistencias MES")
         self.assertEqual(len(faults), 1)
 
+    def test_excel_mes_repetido_gera_hash_identico_sem_versao_fantasma(self):
+        sample = [
+            registro(Code="00000158", Batch="061638"),
+            registro(Code="00000159", Batch="061639"),
+        ]
+        first = preparar_carga_mes(sample, referencia=2)
+        second = preparar_carga_mes(sample, referencia=2)
+        self.assertEqual(first["status"], "PROCESSAR")
+        self.assertEqual(first["sha256"], second["sha256"])
+        self.assertEqual(first["arquivo"], second["arquivo"])
+
     def test_api_batch_gera_coluna_lote_sem_perder_zeros_iniciais(self):
         from io import BytesIO
         import pandas as pd
