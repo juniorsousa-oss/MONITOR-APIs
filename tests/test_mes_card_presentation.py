@@ -77,13 +77,15 @@ class MesCardTests(unittest.TestCase):
             self.assertIn(selector, card_code)
         self.assertNotIn("top, status_col = st.columns", card_code)
         self.assertNotIn("info, action = st.columns", card_code)
-        self.assertIn('with st.popover(', card_code)
+        self.assertIn('if st.button(', card_code)
+        self.assertIn('"↻ REPROCESSAR AGORA"', card_code)
+        self.assertNotIn("mes_reprocessamento_pin", card_code)
 
     def test_estilo_ancora_botao_no_rodape_sem_deslocar_conteudo(self):
         css = (ROOT / "ui.py").read_text(encoding="utf-8")
         self.assertIn(".st-key-mes_general_source_card .mes-source-footer", css)
-        self.assertIn('[data-testid="stPopover"]', css)
-        self.assertIn("position:absolute!important", css)
+        self.assertIn('[data-testid="stButton"] button', css)
+        self.assertNotIn('[data-testid="stPopover"]', css)
         self.assertIn("@media(max-width:600px)", css)
 
     def test_acao_e_renderizada_na_mesma_unidade_visual(self):
@@ -100,9 +102,12 @@ class MesCardTests(unittest.TestCase):
         card_code = ast.get_source_segment(source, card)
         database_code = ast.get_source_segment(source, database)
         self.assertIn("with st.container(border=True, key=\"mes_general_source_card\")", card_code)
-        self.assertIn("with st.popover(", card_code)
-        self.assertIn("CONFIRMAR REPROCESSAMENTO", card_code)
-        self.assertIn("_render_mes_report_card(source, mes_receptor)", database_code)
+        self.assertIn("↻ REPROCESSAR AGORA", card_code)
+        self.assertIn("mes_atualizar_agora", card_code)
+        self.assertIn("_render_mes_report_card(", database_code)
+        self.assertIn("mes_receptor,", database_code)
+        self.assertIn("_mes_await_derived()", card_code)
+        self.assertNotIn("Código privado de homologação", card_code)
         self.assertNotIn("RELATÓRIO GERAL · API MES", database_code)
         self.assertNotIn("mes_atualizar_agora", database_code)
 
