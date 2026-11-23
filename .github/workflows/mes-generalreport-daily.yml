@@ -58,3 +58,34 @@ jobs:
             # no mesmo dia, após uma conferência bem-sucedida.
             python mes_general_report_sync.py --scheduled
           fi
+      # O conversor originalmente dependia de um CRON em outro repositório,
+      # que pode atrasar horas. Depois de confirmar a fonte MES, executamos
+      # aqui apenas o pipeline do Relatório Geral; ele é idempotente e só
+      # reconstrói se a versão de origem ou as dependências mudaram.
+      - name: Obter Conversor MRP aprovado
+        uses: actions/checkout@v4
+        with:
+          repository: juniorsousa-oss/MRP-CONVERSOR
+          ref: main
+          path: .mrp-conversor
+          persist-credentials: false
+      - name: Preparar leitor de planilhas do Conversor
+        run: python -m pip install "python-calamine>=0.3,<1.0"
+      - name: Processar Relatório Geral Tratado na mesma atualização
+        env:
+          PYTHONPATH: .mrp-conversor
+        run: |
+          python - <<'PY'
+          import sys
+          import pipeline_sync
+          result = pipeline_sync.sync_pipeline("Relatório Geral")
+          status = str(result.get("sync_status") or "").upper()
+          print(
+              "MES_RELATORIO_TRATADO",
+              status,
+              "stale_before=", bool(result.get("stale")),
+              "ready=", bool(result.get("ready")),
+          )
+          if status in {"ERRO", "AGUARDANDO", ""}:
+              sys.exit(1)
+          PY
