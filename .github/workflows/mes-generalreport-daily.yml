@@ -1,9 +1,13 @@
-name: SETTA MES GeneralReport — atualização 07h20
+name: SETTA MES GeneralReport — 07h20 + recuperação automática
 on:
   schedule:
     # Horário de Brasília (UTC−03): 10:20 UTC = 07:20 BRT.
-    # GitHub Actions pode iniciar com atraso; não há garantia de minuto exato.
+    # GitHub Actions pode atrasar horas. Tentativas de recuperação alternadas
+    # evitam depender de um único evento de schedule.
+    # A rotina --scheduled só consulta a MES após 07:20 BRT e ainda não
+    # conferida hoje; execuções redundantes terminam sem baixar a fonte.
     - cron: '20 10 * * *'
+    - cron: '17 */2 * * *'
   workflow_dispatch:
   # Ao homologar mudanças na integração MES em main, republicar a fonte
   # somente após os testes de contrato terem concluído com sucesso.
@@ -43,4 +47,11 @@ jobs:
             exit 1
           fi
       - name: Buscar, validar e publicar Relatório Geral MES
-        run: python mes_general_report_sync.py
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            python mes_general_report_sync.py --scheduled
+          else
+            python mes_general_report_sync.py
+          fi
