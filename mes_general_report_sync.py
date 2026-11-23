@@ -15,6 +15,7 @@ import gzip
 import hashlib
 import json
 import os
+from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -179,7 +180,21 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         frame.to_excel(writer, sheet_name="Geral", index=False)
         exceptions.to_excel(writer, sheet_name="Inconsistencias MES", index=False)
-    arquivo = buffer.getvalue()
+        # Sem fixar metadados, cada execução gera novo hash binário apesar
+        # de os registros da MES serem idênticos (Workbook core.xml).
+        writer.book.properties.created = datetime(2000, 1, 1)
+        writer.book.properties.modified = datetime(2000, 1, 1)
+    # Cada membro ZIP também leva timestamp. Normalizar TODAS as entradas
+    # permite comparar hash de conteúdo real e evita versões artificiais.
+    stable = BytesIO()
+    with ZipFile(BytesIO(buffer.getvalue()), "r") as origem_zip:
+        with ZipFile(stable, "w", compression=ZIP_DEFLATED, compresslevel=6) as destino_zip:
+            for membro in origem_zip.infolist():
+                info = ZipInfo(membro.filename, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = ZIP_DEFLATED
+                info.external_attr = membro.external_attr
+                destino_zip.writestr(info, origem_zip.read(membro.filename))
+    arquivo = stable.getvalue()
 
     # Pré-validação de normalização ANTES de atualizar a fonte corrente.
     normalized, normalized_count = store.build_normalized_source(
