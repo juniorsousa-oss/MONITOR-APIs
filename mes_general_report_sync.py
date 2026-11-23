@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from io import BytesIO
+import argparse
 import gzip
 import hashlib
 import json
@@ -19,6 +20,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 import data_store as store
+from mes_refresh_flow import cron_deve_atualizar
 from mes_general_report import URL, TOKEN_ENV
 from mes_general_report_validation import (
     _download_limited, _mes_records, _dia, _quantidade,
@@ -253,8 +255,8 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
     }
 
 
-def sincronizar_relatorio_geral(*, session=None, dry_run=False):
-    """Executa sob autorização, uma consulta por operação.
+def sincronizar_relatorio_geral(*, session=None, dry_run=False, scheduled=False):
+    """Executa uma consulta por operação; em modo cron, ignora dia já conferido.
 
     Atenção: a publicação da Central é o commit que altera a origem.
     A validação do payload e do Excel é concluída antes do commit.
@@ -264,6 +266,15 @@ def sincronizar_relatorio_geral(*, session=None, dry_run=False):
         raise RuntimeError("Token MES ausente no ambiente executor.")
 
     source = _source_status()
+    if scheduled:
+        should_run, reason = cron_deve_atualizar(source)
+        if not should_run:
+            return {
+                "status": reason, "publicado": False,
+                "versao": int(source.get("version") or 0),
+                "timestamp": datetime.now(TZ).isoformat(),
+                "modo": "AGENDADO",
+            }
     referencia = int(source.get("rows_count") or 0) or None
     raw = _download_limited(
         URL,
@@ -329,9 +340,15 @@ def sincronizar_relatorio_geral(*, session=None, dry_run=False):
     return result
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Atualização da fonte MES GeneralReport")
+    parser.add_argument(
+        "--scheduled", action="store_true",
+        help="Respeita janela 07:20 BRT e não repete uma conferência bem-sucedida do dia."
+    )
+    args = parser.parse_args(argv)
     try:
-        res = sincronizar_relatorio_geral()
+        res = sincronizar_relatorio_geral(scheduled=args.scheduled)
         print(json.dumps(res, ensure_ascii=False))
         return 0 if res["status"] != "PROTEGER_BASE" else 2
     except Exception as exc:
