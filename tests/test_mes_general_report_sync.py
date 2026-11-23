@@ -178,6 +178,55 @@ class IngestaoTests(unittest.TestCase):
         self.assertEqual(save.call_args.args[0], "relatorio_geral")
         self.assertEqual(save.call_args.kwargs["rows_count"], 1)
 
+    def test_agendamento_da_mes_nao_repete_fonte_já_conferida(self):
+        session = FakeSession([registro()])
+        with patch.dict(os.environ, {"SETTA_MES_GENERAL_REPORT_TOKEN": "ficticio"}), \
+             patch("mes_general_report_sync._source_status", return_value={
+                 "rows_count": 1, "version": 68, "normalized_available": True,
+                 "last_received_at": "2026-11-23T10:43:05+00:00",
+             }), \
+             patch("mes_general_report_sync.cron_deve_atualizar",
+                   return_value=(False, "JA_CONFERIDO_HOJE")), \
+             patch("mes_general_report_sync.store.save_report") as save:
+            out = sincronizar_relatorio_geral(session=session, scheduled=True)
+        self.assertEqual(out["status"], "JA_CONFERIDO_HOJE")
+        self.assertEqual(out["versao"], 68)
+        self.assertFalse(out["publicado"])
+        self.assertFalse(session.calls)
+        save.assert_not_called()
+
+    def test_recupera_normalizacao_da_mesma_versao_sem_segundo_get(self):
+        session = FakeSession([registro()])
+        prepared = {
+            "status": "PROCESSAR",
+            "auditoria": {"total_recebido": 1, "registros_validos": 1,
+                          "registros_pendentes": 0},
+            "politica": {"motivos_protecao": []},
+            "arquivo": b"excel-fixture", "sha256": "hash-atual",
+            "linhas_fonte": 1, "pendencias_api": 0,
+        }
+        with patch.dict(os.environ, {"SETTA_MES_GENERAL_REPORT_TOKEN": "ficticio"}), \
+             patch("mes_general_report_sync.preparar_carga_mes",
+                   return_value=prepared), \
+             patch("mes_general_report_sync._source_status", side_effect=[
+                 {"rows_count": 1, "version": 67, "content_sha256": "antigo",
+                  "normalized_available": True},
+                 {"rows_count": 1, "version": 68,
+                  "content_sha256": "hash-atual",
+                  "normalized_available": False},
+             ]), \
+             patch("mes_general_report_sync.store.save_report",
+                   side_effect=RuntimeError("bruto salvo, normalização pendente")) as save, \
+             patch("mes_general_report_sync.store.backfill_normalized_source") as backfill:
+            out = sincronizar_relatorio_geral(session=session)
+        self.assertTrue(out["publicado"])
+        self.assertTrue(out["normalizado"])
+        self.assertTrue(out["normalizacao_recuperada"])
+        self.assertEqual(out["versao"], 68)
+        self.assertEqual(len(session.calls), 1)
+        save.assert_called_once()
+        backfill.assert_called_once_with("relatorio_geral")
+
     def test_falha_estrutural_nao_publica(self):
         sample = FakeSession([registro(Code=None)] * 100)
         with patch.dict(os.environ, {"SETTA_MES_GENERAL_REPORT_TOKEN": "ficticio"}), \
