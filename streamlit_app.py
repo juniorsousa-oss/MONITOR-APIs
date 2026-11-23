@@ -882,6 +882,11 @@ def _render_mes_report_card(source: dict, mes_api: dict, treated_base: dict | No
         )
         treated_base = treated_base or {}
         phase, treated_ver = estado_relatorio_tratado(version, treated_base)
+        if phase in {"PROCESSANDO", "ERRO_CONVERSOR"} and version > 0:
+            # Também acompanha uma atualização agendada por outra sessão.
+            st.session_state["_mes_pending_version"] = max(
+                int(st.session_state.get("_mes_pending_version") or 0), version
+            )
         if phase != "CONCLUIDO":
             st.warning(
                 f"Fonte v{version} recebida, mas Tratado v{treated_ver} "
@@ -902,9 +907,13 @@ def _render_mes_report_card(source: dict, mes_api: dict, treated_base: dict | No
         if st.button(
             "↻ REPROCESSAR AGORA",
             key="mes_atualizar_agora",
-            disabled=not tem_token_mes,
+            disabled=not tem_token_mes or phase in {"PROCESSANDO", "ERRO_CONVERSOR"},
             use_container_width=True,
-            help="Uma consulta à MES; o Relatório Geral Tratado atualiza depois automaticamente.",
+            help=(
+                "Aguarde o Conversor MRP concluir: repetir a consulta MES não atualiza a base tratada."
+                if phase in {"PROCESSANDO", "ERRO_CONVERSOR"} else
+                "Uma consulta MES; o Relatório Geral Tratado atualiza depois automaticamente."
+            ),
         ):
             gate = _mes_manual_guard()
             allowed, gate_reason = gate.begin()
