@@ -326,14 +326,30 @@ def sincronizar_relatorio_geral(*, session=None, dry_run=False, scheduled=False)
         )
         return result
 
-    saved = store.save_report(
-        SOURCE_KEY,
-        "RelatorioGeral_MES.xlsx",
-        prepared["arquivo"],
-        rows_count=prepared["linhas_fonte"],
-        origin=ORIGIN,
-        max_attempts=2,
-    )
+    try:
+        saved = store.save_report(
+            SOURCE_KEY,
+            "RelatorioGeral_MES.xlsx",
+            prepared["arquivo"],
+            rows_count=prepared["linhas_fonte"],
+            origin=ORIGIN,
+            max_attempts=2,
+        )
+    except RuntimeError:
+        # A Central pode ter confirmado o bruto e falhado apenas ao publicar
+        # a normalização. Não exigir nova consulta MES nem novo source_commit:
+        # recuperar a MESMA versão, identificada pelo SHA do artefato.
+        committed = _source_status()
+        if committed.get("content_sha256") != prepared["sha256"]:
+            raise
+        if not committed.get("normalized_available"):
+            store.backfill_normalized_source(SOURCE_KEY)
+            result["normalizacao_recuperada"] = True
+        saved = {
+            "version": int(committed.get("version") or 0),
+            "normalized": True,
+        }
+
     result["publicado"] = True
     result["versao"] = saved.get("version")
     result["normalizado"] = bool(saved.get("normalized"))
