@@ -50,8 +50,11 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "$EVENT_NAME" = "schedule" ]; then
-            python mes_general_report_sync.py --scheduled
-          else
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Intervenção explícita do operador é a única execução forçada.
             python mes_general_report_sync.py
+          else
+            # Cron e atualização de código não criam versões repetidas
+            # no mesmo dia, após uma conferência bem-sucedida.
+            python mes_general_report_sync.py --scheduled
           fi
