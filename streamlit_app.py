@@ -13,37 +13,19 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-# Padrão SETTA: tabelas responsivas ao total de registros exibidos nos filtros.
-def _setta_table_height(data, requested=None):
-    """Altura baseada nas linhas reais (DataFrame ou pandas.Styler)."""
-    if isinstance(requested, str):
-        return requested
-    frame = getattr(data, "data", data)
-    try:
-        rows = len(frame)
-    except (TypeError, ValueError, AttributeError):
-        return requested if isinstance(requested, int) and requested >= 120 else None
-    ceiling = max(120, requested) if isinstance(requested, int) and requested > 0 else 600
-    return int(min(ceiling, max(120, 42 + 35 * (min(max(0, rows), 100) + 1))))
-
-
 def _setta_dataframe(data, *args, **kwargs):
-    height = _setta_table_height(data, kwargs.get("height"))
-    if height is None:
-        kwargs.pop("height", None)
-    else:
-        kwargs["height"] = height
+    """Deixa o grid ajustar a altura às linhas e elimina registros totalmente vazios."""
+    if isinstance(data, pd.DataFrame) and not data.empty:
+        populated = data.notna() & data.map(
+            lambda value: not isinstance(value, str) or bool(value.strip()),
+        )
+        data = data.loc[populated.any(axis=1)]
+    if isinstance(data, pd.DataFrame) and data.empty:
+        return st.caption("Sem registros.")
+    kwargs.setdefault("row_height", 34)
+    # O tamanho automático nativo é limitado em tabelas longas e não cria
+    # linhas vazias quando o filtro retorna um ou dois registros.
     return st.dataframe(data, *args, **kwargs)
-
-
-def _setta_data_editor(data, *args, **kwargs):
-    if kwargs.get("num_rows") != "dynamic":
-        height = _setta_table_height(data, kwargs.get("height"))
-        if height is None:
-            kwargs.pop("height", None)
-        else:
-            kwargs["height"] = height
-    return st.data_editor(data, *args, **kwargs)
 
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -332,11 +314,18 @@ def _status_rows(items, *, attention=False):
         row = {"Conexão": item.get("name") or "—", "Tipo": category,
                "Status": status, "Última verificação": store.format_dt(timestamp)}
         if attention:
-            http = item.get("last_http_status")
+            elapsed = item.get("last_latency_ms")
+            limit = item.get("warning_latency_ms")
+            high_latency = (
+                isinstance(elapsed, (int, float)) and isinstance(limit, (int, float))
+                and elapsed >= limit
+            )
+            is_sync = "CONSUMER" in str(item.get("health_mode") or "") or category == "Integração"
             row["Próximo passo"] = (
-                "Verificar a origem" if status == "OFFLINE" else
                 "Aguardar a primeira verificação" if status in {"SEM DADOS", "AGUARDANDO"} else
-                "Conferir latência e detalhes" if http == 200 else "Conferir a conexão"
+                "Conferir a sincronização" if is_sync else
+                "Verificar a origem" if status == "OFFLINE" else
+                "Conferir latência" if high_latency else "Abrir detalhes"
             )
         rows.append(row)
     return rows
@@ -427,8 +416,9 @@ def render_monitor() -> None:
         else:
             st.success("Nenhuma conexão exige atenção." if active else "Sem conexões verificadas.")
     elif view == "Conexões":
-        term = st.text_input("Buscar conexão").strip().casefold()
-        status_filter = st.selectbox("Status", ["Todos", *sorted(set(statuses))])
+        search, filters = st.columns([2, 1])
+        term = search.text_input("Buscar conexão").strip().casefold()
+        status_filter = filters.selectbox("Status", ["Todos", *sorted(set(statuses))])
         filtered = [x for x in items if term in str(x[1].get("name") or "").casefold()
                     and (status_filter == "Todos" or _api_status(x[1]) == status_filter)]
         if filtered:
@@ -859,21 +849,23 @@ def _render_mes_report_card(source: dict, mes_api: dict, treated_base: dict | No
 
 
 def _render_feeding(sources):
-    section_band("01 · ALIMENTAÇÃO", "Enviar arquivos", "")
+    section_band("ALIMENTAÇÃO", "Enviar arquivos", "")
     source_map = {
         f"{item['name']} · {item['source_system']}": item
-        for item in sources
+        for item in sources if item.get("source_key") != "movimentacao"
     }
+    if receipt := st.session_state.pop("_central_feed_receipt", None):
+        st.success(receipt)
 
     preset = st.radio(
         "PACOTE DE ALIMENTAÇÃO",
         [
             "PERSONALIZADO",
+            "PRÉ-NOTAS MES",
             "RELATÓRIO GERAL",
             "ESTOQUE",
             "COMPRAS",
             "TCTP",
-            "MOVIMENTAÇÃO",
             "FECHAMENTO MENSAL",
         ],
         horizontal=True,
@@ -885,10 +877,12 @@ def _render_feeding(sources):
         "ESTOQUE": {"analitico", "endereco"},
         "COMPRAS": {"sc", "pc", "pre_nota"},
         "TCTP": {"pmp", "h001"},
-        "MOVIMENTAÇÃO": {"movimentacao"},
     }
 
-    if preset == "FECHAMENTO MENSAL":
+    if preset == "PRÉ-NOTAS MES":
+        selected_sources = [item for item in sources if item.get("source_key") == "mes_pre_notas"]
+        st.caption("Conferência de nota fiscal no MES · sem filtro de data · status Pré-nota lançada.")
+    elif preset == "FECHAMENTO MENSAL":
         selected_sources = store.closing_source_fields(sources)
         st.caption("Envie as quatro fontes aqui. O Fechamento Mensal lê os JSONs pela Central.")
     else:
@@ -913,7 +907,8 @@ def _render_feeding(sources):
         )
         uploaded = st.file_uploader(
             f"ARQUIVO — {source['name']}",
-            type=(["xlsx", "xltx"] if source_key in store.CLOSING_MOVEMENT_KEYS else
+            type=(["xlsx"] if source_key == "mes_pre_notas" else
+                  ["xlsx", "xltx"] if source_key in store.CLOSING_MOVEMENT_KEYS else
                   ["xlsx", "xls", "xlsm", "xltx", "csv", "xml", "txt", "json"]),
             accept_multiple_files=False,
             key=f"central_batch_upload_{source_key}",
@@ -970,7 +965,9 @@ def _render_feeding(sources):
                     try:
                         store.touch_source(source_key)
                     except Exception:
-                        pass
+                        failed_sources.append((source["name"], "Não foi possível registrar a conferência"))
+                        progress.progress(index / total)
+                        continue
                     skipped_names.append(source["name"])
                     done_hashes[source_key] = fingerprint
                     status.write(
@@ -1035,10 +1032,12 @@ def _render_feeding(sources):
                 )
             else:
                 st.session_state.pop("_central_batch_done_hashes", None)
-                st.success(
-                    f"{len(updated_names) + len(skipped_names)} fonte(s) atualizada(s): "
-                    + " • ".join(updated_names + skipped_names)
-                )
+                parts = []
+                if updated_names:
+                    parts.append("Atualizado: " + " · ".join(updated_names))
+                if skipped_names:
+                    parts.append("Conferido, sem alteração: " + " · ".join(skipped_names))
+                st.session_state["_central_feed_receipt"] = " | ".join(parts)
                 st.rerun()
 
 
@@ -1204,10 +1203,12 @@ def render_database() -> None:
     if view == "Manutenção":
         _render_database_maintenance(sources)
         return
-    items = sources if view == "Fontes" else _derived_with_materials()
-    term = st.text_input("Buscar fonte ou base", key=f"monitor_data_search_{view}").strip().casefold()
+    items = ([item for item in sources if item.get("source_key") != "movimentacao"]
+             if view == "Fontes" else _derived_with_materials())
+    search, filters = st.columns([2, 1])
+    term = search.text_input("Buscar fonte ou base", key=f"monitor_data_search_{view}").strip().casefold()
     options = sorted({str(item.get("status") or "AGUARDANDO") for item in items})
-    selected_status = st.selectbox("Status da carga", ["Todos", *options], key=f"monitor_data_status_{view}")
+    selected_status = filters.selectbox("Status da carga", ["Todos", *options], key=f"monitor_data_status_{view}")
     shown = [item for item in items if term in str(item.get("name") or "").casefold()
              and (selected_status == "Todos" or str(item.get("status") or "AGUARDANDO") == selected_status)]
     if not shown:
@@ -1215,7 +1216,8 @@ def render_database() -> None:
         return
     _setta_dataframe(pd.DataFrame([
         {"Nome": item.get("name") or "—", "Status": item.get("status") or "AGUARDANDO",
-         "Última carga": store.format_dt(item.get("last_update_at") or item.get("processed_at"))}
+         "Última conferência": store.format_dt(item.get("last_received_at")
+                                               or item.get("last_update_at") or item.get("processed_at"))}
         for item in shown
     ]), width="stretch", hide_index=True)
     key_name = "source_key" if view == "Fontes" else "key"
@@ -1247,6 +1249,21 @@ def render_database() -> None:
                         if str(api.get("id") or "") == "11111111-1111-4111-8111-111111111119"), {})
             selected["api_health"] = _api_status(pmp) if pmp else ""
         st.markdown(source_card(selected), unsafe_allow_html=True)
+        if chosen == "pmp":
+            treated = next((base for base in store.list_derived_bases()
+                            if base.get("key") == "tctp_tratado"), {})
+            received = int(selected.get("version") or 0)
+            used = int((treated.get("source_versions") or {}).get("pmp") or 0)
+            if (received and selected.get("normalized_available") and used == received
+                    and treated.get("status") == "ATUALIZADO"):
+                st.caption(f"TC/TP Tratado já usa o PMP v{received}.")
+            elif received:
+                st.warning(f"PMP v{received} na Central. TC/TP Tratado usa v{used or '—'}.")
+        elif chosen == "mes_pre_notas":
+            if selected.get("normalized_available"):
+                st.caption("JSON disponível para o Controle de NFs.")
+            elif selected.get("version"):
+                st.warning("Arquivo recebido; JSON ainda indisponível para o Controle de NFs.")
 
 
 page = render_sidebar()

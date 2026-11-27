@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from mes_pre_notas import validate_sheets as validate_mes_pre_notas_sheets
 from mes_refresh_flow import DAILY_ROUTINE_LABEL
 
 TZ = ZoneInfo("America/Sao_Paulo")
@@ -1022,8 +1023,8 @@ SOURCE_CATALOG = [
         "name": "MES PRÉ NOTAS",
         "source_system": "MES",
         "apps": "Controle de NFs",
-        "mode": "UPLOAD CENTRAL",
-        "api_plan": True,
+        "mode": "EXCEL DO MES · ROTINA 06H",
+        "api_plan": False,
     },
     {
         "key": "movimentacao",
@@ -1954,6 +1955,9 @@ def build_normalized_source(
     suffix = Path(str(file_name or "").lower()).suffix
     sheets: list[dict[str, Any]] = []
 
+    if str(source_key).strip().lower() == "mes_pre_notas" and suffix != ".xlsx":
+        raise ValueError("Use o Excel .xlsx exportado pelo MES.")
+
     if suffix in {".xlsx", ".xlsm", ".xltx"}:
         sheets = _read_xlsx_streaming(raw)
 
@@ -2006,6 +2010,9 @@ def build_normalized_source(
         )
     else:
         return b"", 0
+
+    if str(source_key).strip().lower() == "mes_pre_notas":
+        validate_mes_pre_notas_sheets(sheets)
 
     if str(source_key).strip().lower() == "movimentacao":
         if not sheets or not (sheets[0].get("rows") or []):
@@ -2185,7 +2192,7 @@ def save_report(
     pre_normalized: bytes | None = None
     pre_normalized_rows = 0
     source_kind = str(source_key).strip().lower()
-    if source_kind in {"movimentacao", "relatorio_geral"} | CLOSING_MOVEMENT_KEYS:
+    if source_kind in {"movimentacao", "relatorio_geral", "mes_pre_notas"} | CLOSING_MOVEMENT_KEYS:
         pre_normalized, pre_normalized_rows = build_normalized_source(
             source_key,
             file_name,

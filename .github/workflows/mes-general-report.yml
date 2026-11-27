@@ -22,6 +22,8 @@ on:
       - mes_general_report_validation.py
       - mes_general_report_sync.py
       - mes_refresh_flow.py
+      - mes_pre_notas.py
+      - tests/test_mes_pre_notas.py
       - tests/test_mes_refresh_flow.py
       - mes_sync_diagnostics.py
       - tests/test_mes_manual_diagnostics.py
@@ -51,7 +53,7 @@ jobs:
       - name: Dependências de validação
         run: python -m pip install -r requirements.txt
       - name: Validar sintaxe
-        run: python -m py_compile data_store.py monitor_logic.py mes_general_report.py mes_general_report_validation.py mes_general_report_reconciliation.py mes_general_report_sync.py streamlit_app.py ui.py mes_sync_diagnostics.py mes_refresh_flow.py
+        run: python -m py_compile data_store.py monitor_logic.py mes_general_report.py mes_general_report_validation.py mes_general_report_reconciliation.py mes_general_report_sync.py streamlit_app.py ui.py mes_sync_diagnostics.py mes_refresh_flow.py mes_pre_notas.py
       - name: Testar integração sem credenciais reais
         run: |
           python -m unittest discover -s tests -p 'test_mes_general_report*.py' -v
@@ -59,3 +61,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_mes_refresh_flow.py' -v
           python -m unittest discover -s tests -p 'test_mes_pendencia_linha_1611.py' -v
           python -m unittest discover -s tests -p 'test_mes_manual_diagnostics.py' -v
+          python -m unittest discover -s tests -p 'test_mes_pre_notas.py' -v
