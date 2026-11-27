@@ -29,7 +29,7 @@ class MesCardTests(unittest.TestCase):
         }, {"status": "OFFLINE", "active": False})
         self.assertTrue(state["published"])
         self.assertEqual(state["badge"], "API INTEGRADA")
-        self.assertEqual(state["mode"], "API AUTOMÁTICA · 07:20")
+        self.assertEqual(state["mode"], "API AUTOMÁTICA · 06:00")
 
     def test_sem_conexao_nunca_afirma_primeira_carga_concluida(self):
         state = mes_source_display({

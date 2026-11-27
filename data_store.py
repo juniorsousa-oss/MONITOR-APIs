@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from mes_refresh_flow import DAILY_ROUTINE_LABEL
+
 TZ = ZoneInfo("America/Sao_Paulo")
 ROOT = Path(__file__).parent
 RUNTIME = ROOT / ".runtime"
@@ -1257,7 +1259,7 @@ def list_sources() -> list[dict]:
                 "apps": base["apps"],
                 "source_system": base["source_system"],
                 "mode": (
-                    "API AUTOMÁTICA · 07:20" if mes_api_active else
+                    f"API AUTOMÁTICA · {DAILY_ROUTINE_LABEL}" if mes_api_active else
                     "API AUTOMÁTICA" if pmp_api_active else
                     "CONTINGÊNCIA MANUAL" if base["key"] == "pmp" and bool(row.get("available")) else
                     base["mode"]

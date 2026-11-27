@@ -7,6 +7,8 @@ from functools import lru_cache
 
 import streamlit as st
 
+from mes_refresh_flow import DAILY_ROUTINE_LABEL
+
 ROOT = Path(__file__).parent
 LOGO_FILE = ROOT / "config" / "logo_setta.svg"
 
@@ -415,9 +417,9 @@ def mes_source_display(source: dict, mes_api: dict) -> dict:
         "published": published,
         "health": health,
         "badge": "API INTEGRADA" if connected else "API CONFIGURADA",
-        "mode": "API AUTOMÁTICA · 07:20" if published
-                else "API CONECTADA · 07:20" if connected
-                else "API PROGRAMADA · 07:20",
+        "mode": f"API AUTOMÁTICA · {DAILY_ROUTINE_LABEL}" if published
+                else f"API CONECTADA · {DAILY_ROUTINE_LABEL}" if connected
+                else f"API PROGRAMADA · {DAILY_ROUTINE_LABEL}",
         "sync_label": "CARGA VIA API CONFIRMADA" if published
                       else "PRIMEIRA CARGA VIA API PENDENTE",
     }

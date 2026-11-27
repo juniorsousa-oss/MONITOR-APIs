@@ -223,22 +223,25 @@ sinaliza a situação na homologação. O Monitor não envia dados à Central;
 a coleta/persistência automática da API ainda depende de uma etapa de
 integração dedicada e configuração segura do ambiente executor.
 
-## GeneralReport MES — sincronização diária às 07h20 e reprocessamento manual
+## GeneralReport MES — rotina diária às 06h e reprocessamento manual
 
 A origem `relatorio_geral` pode ser alimentada diretamente pelo MES após
 validação de estrutura, volume e exceções. O mesmo `source_key` da Central
 é usado: não é criada uma nova fonte paralela.
 
-- **Agendador:** GitHub Actions `.github/workflows/mes-generalreport-daily.yml`
-  com cron `20 10 * * *` (10:20 UTC / 07:20 Brasília). O agendador do GitHub
-  pode começar alguns minutos depois; a hora não é uma garantia de execução exata.
-- **Ação manual:** Banco de Dados → Relatório Geral · API MES →
-  **ATUALIZAR AGORA**, autorizada pelo PIN já usado na homologação.
+- **Rotina das 06h (Brasília):** primeiro são enviadas as fontes manuais;
+  em seguida a rotina aciona o **REPROCESSAR AGORA** em Banco de Dados →
+  Relatório Geral · API MES. A confirmação usa o recibo normalizado da fonte.
+- **Recuperação:** GitHub Actions (`.github/workflows/mes-generalreport-daily.yml`)
+  a partir das 07h20, somente se não houver recibo normalizado do dia desde
+  as 06h. Se já houve conferência, inclusive sem alteração de conteúdo,
+  não consulta o MES novamente. O cron do GitHub pode sofrer atrasos.
+- **Ação manual:** **REPROCESSAR AGORA** também continua disponível sob demanda.
   Consulta a API, separa erros, faz pré-validação do Excel e publica a
   fonte na Central. O `pipeline_worker.py` do Conversor MRP verifica
   alterações aproximadamente a cada 5 minutos e atualiza sua base derivada.
 - **Identificação:** após a primeira carga API, o cartão da fonte mostra
-  `API INTEGRADA` e `API AUTOMÁTICA · 07:20`, com data e registros.
+  `API INTEGRADA` e `API AUTOMÁTICA · 06:00`, com data e registros.
 - **Exceções:** registros válidos são processados; registros com problema
   ficam registrados em `Inconsistencias MES` e, quando a chave é
   inválida mas os números/datas são legíveis, também entram na quarentena

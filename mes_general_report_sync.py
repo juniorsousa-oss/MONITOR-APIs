@@ -15,6 +15,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 from zoneinfo import ZoneInfo
 
@@ -193,7 +194,17 @@ def preparar_carga_mes(payload, *, referencia: int | None = None):
                 info = ZipInfo(membro.filename, date_time=(1980, 1, 1, 0, 0, 0))
                 info.compress_type = ZIP_DEFLATED
                 info.external_attr = membro.external_attr
-                destino_zip.writestr(info, origem_zip.read(membro.filename))
+                content = origem_zip.read(membro.filename)
+                if membro.filename == "docProps/core.xml":
+                    # O openpyxl redefine modified na gravação, mesmo se
+                    # já fixado acima. Normalize sem alterar o XML de dados.
+                    content = re.sub(
+                        rb"(<dcterms:modified\b[^>]*>)[^<]*(</dcterms:modified>)",
+                        rb"\g<1>2000-01-01T00:00:00Z\g<2>",
+                        content,
+                        count=1,
+                    )
+                destino_zip.writestr(info, content)
     arquivo = stable.getvalue()
 
     # Pré-validação de normalização ANTES de atualizar a fonte corrente.
@@ -375,7 +386,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Atualização da fonte MES GeneralReport")
     parser.add_argument(
         "--scheduled", action="store_true",
-        help="Respeita janela 07:20 BRT e não repete uma conferência bem-sucedida do dia."
+        help="Recupera a partir de 07:20 BRT só se não houve conferência válida desde 06:00 BRT."
     )
     args = parser.parse_args(argv)
     try:
