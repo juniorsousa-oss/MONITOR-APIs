@@ -164,67 +164,50 @@ inject_css()
 # A tela apenas lê os resultados. O worker é responsável pelos testes das APIs.
 
 
+MONITOR_ROUTES = ("MONITOR DE APIs", "BANCO DE DADOS")
+MONITOR_LABELS = ("Monitor de APIs", "Banco de Dados")
+MONITOR_ICONS = ("monitoring", "database")
+
+
+def _set_monitor_page(target: int) -> None:
+    st.session_state["monitor_route"] = target
+
+
 def render_sidebar() -> str:
+    legacy = st.session_state.get("central_monitor_page")
+    initial = MONITOR_ROUTES.index(legacy) if legacy in MONITOR_ROUTES else 0
+    route = st.session_state.get("monitor_route", initial)
     with st.sidebar:
-        st.markdown(
-            '<div class="sidebar-brand">'
-            '<div class="sidebar-brand-title">MONITOR DE APIs</div>'
-            '<div class="sidebar-brand-sub">Central operacional SETTA</div>'
-            '</div>'
-            '<div class="sidebar-section-label">NAVEGAÇÃO</div>',
-            unsafe_allow_html=True,
-        )
-        page = st.radio(
-            "NAVEGAÇÃO",
-            ["MONITOR DE APIs", "BANCO DE DADOS"],
-            label_visibility="collapsed",
-            key="central_monitor_page",
-        )
-
-        # A tela de Banco de Dados pode processar arquivos grandes.
-        # Não interromper uploads/processamentos com o refresh de 30 segundos.
-        if page == "MONITOR DE APIs":
-            st_autorefresh(
-                # O monitor 24/7 roda no Supabase a cada 2 minutos.
-                # A UI acompanha o mesmo ciclo para reduzir consumo no Streamlit.
-                interval=120_000,
-                limit=None,
-                key="setta_monitor_refresh",
-            )
-
-        st.markdown("---")
-        st.markdown(
-            '<div class="sidebar-info-card">'
-            '<b>CENTRAL DE DADOS</b><br>'
-            'IDENTIDADE VISUAL GLOBAL<br>'
-            'ATUALIZAÇÃO AUTOMÁTICA · 30 S'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-    return page
-
-
-def render_logo() -> None:
-    image = logo_html(
-        str(VISUAL_CONFIG.get("logo_data") or ""),
-        str(VISUAL_CONFIG.get("logo_mime") or "image/svg+xml"),
-    )
-    st.markdown(
-        f'<div class="setta-logo-card">{image}</div>',
-        unsafe_allow_html=True,
-    )
+        with st.container(key="setta_route_list"):
+            st.html('<div class="sidebar-brand">Navegação</div>')
+            for index, label in enumerate(MONITOR_LABELS):
+                st.button(label, key=f"setta_nav_{index}", width="stretch",
+                          type="primary" if index == route else "secondary",
+                          icon=f":material/{MONITOR_ICONS[index]}:",
+                          on_click=_set_monitor_page, args=(index,))
+        with st.container(key="monitor_sidebar_status"):
+            if route == 0:
+                st.html(
+                    '<div class="sidebar-section-label">Monitoramento</div>'
+                    '<div class="sidebar-status-card"><div class="sidebar-status-name">'
+                    'Atualização automática</div><div class="sidebar-status-meta">'
+                    'A cada 2 minutos</div></div>'
+                )
+                # Banco de Dados não atualiza sozinho enquanto recebe arquivos.
+                st_autorefresh(interval=120_000, limit=None, key="setta_monitor_refresh")
+    return MONITOR_ROUTES[route]
 
 
 def render_header(title: str, subtitle: str, pill: str) -> None:
-    markup = (
-        '<div class="app-head"><div>'
-        f'<div class="app-title">{title}</div>'
-        f'<div class="app-sub">{subtitle}</div>'
-        '</div>'
-        f'<div class="system-pill"><span class="pulse"></span>{pill}</div>'
-        '</div>'
+    route = 1 if title == "BANCO DE DADOS | SETTA" else 0
+    label = MONITOR_LABELS[route]
+    st.markdown(
+        f'<div class="monitor-page-head"><div class="setta-inv-intro" data-setta-route="{route}">'
+        f'<div class="setta-inv-breadcrumb">Setta / {label}</div><h1>{label}</h1>'
+        f'<p>{ui_components.esc(subtitle)}</p></div>'
+        f'<div class="system-pill"><span class="pulse"></span>{ui_components.esc(pill)}</div></div>',
+        unsafe_allow_html=True,
     )
-    st.markdown(markup, unsafe_allow_html=True)
 
 
 def _count_rows(name: str, raw: bytes) -> int:
@@ -1453,7 +1436,10 @@ def render_database() -> None:
 
 
 page = render_sidebar()
-render_logo()
+ui_components.render_setta_shell(
+    str(VISUAL_CONFIG.get("logo_data") or ""),
+    str(VISUAL_CONFIG.get("logo_mime") or "image/svg+xml"),
+)
 
 if page == "MONITOR DE APIs":
     render_monitor()
