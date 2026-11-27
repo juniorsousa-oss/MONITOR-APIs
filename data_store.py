@@ -1065,6 +1065,19 @@ SOURCE_CATALOG = [
     },
 ]
 
+
+CLOSING_SOURCE_ORDER = ("ops", "kardex_s2", "kardex_ep", "kardex_e2")
+
+
+def closing_source_fields(sources):
+    """O pacote de fechamento tem quatro campos, inclusive sem carga anterior."""
+    status = {item["source_key"]: item for item in sources}
+    catalog = {item["key"]: item for item in SOURCE_CATALOG}
+    return [
+        {**catalog[key], "source_key": key, **status.get(key, {})}
+        for key in CLOSING_SOURCE_ORDER
+    ]
+
 DERIVED_CATALOG = [
     {
         "key": "relatorio_geral_tratado",
@@ -1839,7 +1852,7 @@ def _read_xlsx_streaming(raw: bytes) -> list[dict[str, Any]]:
 
 
 # Preserva exatamente a leitura física usada pelos parsers do Fechamento Mensal.
-CLOSING_MOVEMENT_KEYS = {"ops", "kardex_s2", "kardex_ep", "kardex_e2"}
+CLOSING_MOVEMENT_KEYS = frozenset(CLOSING_SOURCE_ORDER)
 
 
 def _build_closing_movement_pack(source_key: str, file_name: str, raw: bytes) -> tuple[bytes, int]:
