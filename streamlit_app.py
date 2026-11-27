@@ -318,504 +318,392 @@ def render_api_registration() -> None:
                 st.error(f"Não foi possível salvar a API: {exc}")
 
 
+def _api_status(item):
+    if not item.get("active", True):
+        return "DESATIVADA"
+    return str(item.get("status") or "SEM DADOS").upper()
+
+
+def _status_rows(items, *, attention=False):
+    rows = []
+    for category, item in items:
+        status = _api_status(item)
+        timestamp = item.get("last_check_at") or item.get("last_activity_at")
+        row = {"Conexão": item.get("name") or "—", "Tipo": category,
+               "Status": status, "Última verificação": store.format_dt(timestamp)}
+        if attention:
+            http = item.get("last_http_status")
+            row["Próximo passo"] = (
+                "Verificar a origem" if status == "OFFLINE" else
+                "Aguardar a primeira verificação" if status in {"SEM DADOS", "AGUARDANDO"} else
+                "Conferir latência e detalhes" if http == 200 else "Conferir a conexão"
+            )
+        rows.append(row)
+    return rows
+
+
+def _render_selected_api(apis, *, maintenance=False):
+    api_map = {str(x["id"]): x for x in apis if x.get("id")}
+    selected_id = st.selectbox(
+        "Detalhes de uma API", list(api_map), index=None, placeholder="Selecione uma API",
+        format_func=lambda key: str(api_map[key].get("name") or key),
+        key="monitor_api_maintenance" if maintenance else "monitor_api_detail",
+    )
+    if not selected_id:
+        return
+    api = api_map[selected_id]
+    if not maintenance:
+        detail = monitor.hydrate_api(api)
+        st.markdown(api_card(detail), unsafe_allow_html=True)
+        if api.get("active", True) and st.button("Revalidar conexão", key="monitor_revalidate"):
+            try:
+                with st.spinner("Verificando conexão..."):
+                    result = monitor.restart_api(api)
+                outcome = str(result.get("status") or "SEM DADOS")
+                st.session_state["_monitor_check_notice"] = f"{api.get('name')}: {outcome}."
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Não foi possível revalidar a conexão: {exc}")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Método", api.get("method") or "GET")
+    c2.metric("HTTP esperado", api.get("expected_status") or 200)
+    c3.metric("Timeout", f"{api.get('timeout_seconds') or 10}s")
+    st.caption("Conexão: " + str(api.get("source_app") or "—") + " → " + str(api.get("target_app") or "—"))
+    st.caption("Recurso: " + str(api.get("resource") or "—"))
+    st.caption("Local da conexão: " + str(api.get("code_location") or "—"))
+    st.code(str(api.get("endpoint") or ""), language=None)
+    if st.toggle("Consultar últimas verificações", key="monitor_show_checks_" + selected_id):
+        checks = store.list_checks(selected_id, limit=50)
+        if checks:
+            columns = ("checked_at","status","http_status","latency_ms","success","error_message")
+            frame = pd.DataFrame(checks)
+            _setta_dataframe(frame[[c for c in columns if c in frame.columns]], width="stretch", hide_index=True)
+        else:
+            st.info("Nenhuma verificação registrada.")
+    if not api.get("system"):
+        confirmed = st.checkbox("Confirmar exclusão desta API do Monitor", key="monitor_confirm_delete_" + selected_id)
+        if st.button("Excluir API", disabled=not confirmed, key="monitor_delete_" + selected_id):
+            try:
+                store.delete_api(selected_id)
+                st.session_state["_monitor_check_notice"] = f"{api.get('name')}: API excluída do Monitor."
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Não foi possível excluir a API: {exc}")
+
+
 def render_monitor() -> None:
-    raw_apis = store.list_apis(include_demo=True)
-
-    restart_id = str(st.query_params.get("restart_api") or "").strip()
-    if restart_id:
-        target = next(
-            (api for api in raw_apis if str(api.get("id") or "") == restart_id),
-            None,
-        )
-        try:
-            if target is None:
-                raise ValueError("API não encontrada.")
-            result = monitor.restart_api(target)
-            attempts = int(result.get("restart_attempts") or 1)
-            ok = bool(result.get("success"))
-            st.session_state["_api_restart_notice"] = {
-                "ok": ok,
-                "message": (
-                    f"{target.get('name')}: conexão restabelecida em {attempts} tentativa(s)."
-                    if ok
-                    else (
-                        f"{target.get('name')}: a reinicialização foi executada, mas a API continua "
-                        f"indisponível. {result.get('error_message') or 'Verifique a origem.'}"
-                    )
-                ),
-            }
-        except Exception as exc:
-            st.session_state["_api_restart_notice"] = {
-                "ok": False,
-                "message": f"Não foi possível reiniciar a API: {exc}",
-            }
-        st.query_params.clear()
-        st.rerun()
-
-    apis = monitor.hydrate_all(raw_apis)
+    apis = store.list_apis(include_demo=False)
     integrations = store.list_integrations()
-
-    render_header(
-        "MONITOR DE APIs | SETTA",
-        "APIS • INTEGRAÇÕES • DISPONIBILIDADE",
-        _monitor_pill(apis),
-    )
-
+    render_header("MONITOR DE APIs | SETTA", "Saúde das conexões", _monitor_pill(apis))
+    if notice := st.session_state.pop("_monitor_check_notice", None):
+        st.info(notice)
     if not store.monitor_shared_enabled():
-        st.error(
-            "BACKEND COMPARTILHADO INDISPONÍVEL: a Central de Dados SETTA não está "
-            "acessível para persistir os checks do Monitor. Verifique a Edge Function "
-            "setta-data-api antes de executar novos ciclos."
-        )
+        st.error("Central de Dados indisponível para registrar verificações.")
 
-    restart_notice = st.session_state.pop("_api_restart_notice", None)
-    if restart_notice:
-        if restart_notice.get("ok"):
-            st.success(str(restart_notice.get("message") or "API reiniciada."))
+    items = ([("API", api) for api in apis] + [("Integração", item) for item in integrations])
+    statuses = [_api_status(item) for _, item in items]
+    active = [status for status in statuses if status != "DESATIVADA"]
+    kpi_grid([
+        {"label": "Online", "value": active.count("ONLINE"), "accent": "#22c55e"},
+        {"label": "Em atenção", "value": active.count("ATENÇÃO"), "accent": "#ffbb00"},
+        {"label": "Offline", "value": active.count("OFFLINE"), "accent": "#ef4444"},
+        {"label": "Sem verificação", "value": sum(s not in {"ONLINE", "ATENÇÃO", "OFFLINE"} for s in active)},
+    ])
+
+    view = st.segmented_control("Visualização do Monitor",
+        ["Pendências", "Conexões", "Incidentes", "Manutenção"], default="Pendências",
+        required=True, key="monitor_view", label_visibility="collapsed")
+    if view == "Pendências":
+        priority = {"OFFLINE": 0, "ATENÇÃO": 1}
+        queue = sorted((x for x in items if _api_status(x[1]) not in {"ONLINE", "DESATIVADA"}),
+                       key=lambda x: (priority.get(_api_status(x[1]), 2), str(x[1].get("name") or "")))
+        if queue:
+            _setta_dataframe(pd.DataFrame(_status_rows(queue, attention=True)), width="stretch", hide_index=True)
+            affected = {str(item.get("id")) for category, item in queue if category == "API"}
+            if affected:
+                _render_selected_api([api for api in apis if str(api.get("id")) in affected])
         else:
-            st.error(str(restart_notice.get("message") or "Falha ao reiniciar a API."))
-
-    active = [x for x in apis if str(x.get("status")).upper() != "DESATIVADA"]
-    online = sum(1 for x in active if str(x.get("status")).upper() == "ONLINE")
-    attention = sum(1 for x in active if str(x.get("status")).upper() == "ATENÇÃO")
-    offline = sum(1 for x in active if str(x.get("status")).upper() == "OFFLINE")
-
-    integration_online = sum(
-        1 for item in integrations if str(item.get("status")).upper() == "ONLINE"
-    )
-    integration_attention = sum(
-        1 for item in integrations if str(item.get("status")).upper() == "ATENÇÃO"
-    )
-    integration_offline = sum(
-        1 for item in integrations if str(item.get("status")).upper() == "OFFLINE"
-    )
-
-    kpi_grid(
-        [
-            {
-                "label": "APIs / serviços",
-                "value": len(active),
-                "note": f"{online} online",
-                "accent": "#111827",
-            },
-            {
-                "label": "Serviços online",
-                "value": online,
-                "note": f"{attention} atenção • {offline} offline",
-                "accent": "#22c55e" if offline == 0 else "#ef4444",
-            },
-            {
-                "label": "Integrações",
-                "value": len(integrations),
-                "note": "",
-                "accent": "#111827",
-            },
-            {
-                "label": "Integrações OK",
-                "value": integration_online,
-                "note": f"{integration_attention} atenção • {integration_offline} offline",
-                "accent": "#22c55e" if integration_offline == 0 else "#ef4444",
-            },
-        ]
-    )
-
-    real_apis = list(apis)
-    b1, b2 = st.columns([1, 1])
-    if b1.button(
-        "VERIFICAR TODAS AGORA",
-        type="primary",
-        use_container_width=True,
-        disabled=not bool(real_apis),
-    ):
-        with st.spinner("Executando verificações..."):
-            monitor.run_all_checks()
-        st.success("Ciclo manual concluído.")
-        st.rerun()
-
-    if b2.button("ATUALIZAR PAINEL", use_container_width=True):
-        st.rerun()
-
-    render_api_registration()
-
-    section_band(
-        "01 · SERVIÇOS",
-        "APIS E ENDPOINTS",
-        "",
-    )
-    st.markdown(
-        '<div class="api-grid">' + "".join(api_card(api) for api in apis) + "</div>",
-        unsafe_allow_html=True,
-    )
-
-    if real_apis:
-        with st.expander("DETALHES", expanded=False):
-            api_map = {str(x.get("name")): x for x in real_apis}
-            selected_name = st.selectbox("API", list(api_map.keys()))
-            selected = api_map[selected_name]
-            h1, h2, h3 = st.columns(3)
-            h1.metric("Método", selected.get("method") or "GET")
-            h2.metric("HTTP esperado", selected.get("expected_status") or 200)
-            h3.metric("Timeout", f"{selected.get('timeout_seconds') or 10}s")
-            if selected.get("source_app") or selected.get("target_app"):
-                st.caption(
-                    "CONEXÃO · "
-                    + str(selected.get("source_app") or "—")
-                    + " → "
-                    + str(selected.get("target_app") or "—")
-                )
-                st.caption(
-                    "SERVIÇO · "
-                    + str(selected.get("service") or "—")
-                    + "  |  RECURSO · "
-                    + str(selected.get("resource") or "—")
-                )
-                st.caption(
-                    "LOCAL DA CONEXÃO · "
-                    + str(selected.get("code_location") or "—")
-                )
-            st.code(str(selected.get("endpoint") or ""), language=None)
-
-            if selected.get("system"):
-                meta = selected.get("integration_meta") or {}
-                s1, s2, s3, s4 = st.columns(4)
-                s1.metric("Carga", f"#{meta.get('carga_id') or '—'}")
-                s2.metric("Itens", meta.get("total_itens") or 0)
-                s3.metric("Produtos", meta.get("total_produtos") or 0)
-                s4.metric("Últ. fonte", meta.get("ultima_verificacao_label") or "—")
-            else:
-                checks = store.list_checks(str(selected.get("id")), limit=50)
-                if checks:
-                    history = pd.DataFrame(checks)
-                    cols = [
-                        c
-                        for c in [
-                            "checked_at",
-                            "status",
-                            "http_status",
-                            "latency_ms",
-                            "success",
-                            "error_message",
-                        ]
-                        if c in history.columns
-                    ]
-                    _setta_dataframe(history[cols], use_container_width=True, hide_index=True)
-
-                if not selected.get("system") and st.button("EXCLUIR API SELECIONADA", type="secondary"):
-                    store.delete_api(str(selected.get("id")))
-                    st.rerun()
-
-    # Homologação controlada: resultado agregado, sem dados brutos, acesso
-    # apenas com um segundo segredo que NÃO é o token do serviço MES.
-    with st.expander("HOMOLOGAÇÃO — RELATÓRIO GERAL VIA API MES", expanded=False):
-        st.caption(
-            "Busca o JSON completo uma única vez, compara com a última fonte "
-            "normalizada Relatório Geral da Central e apresenta apenas indicadores "
-            "agregados. NÃO substitui planilhas, não publica registros e não altera MRP."
-        )
-        chave_esperada = os.getenv("SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", "")
-        if len(chave_esperada) < 12:
-            st.info(
-                "HOMOLOGAÇÃO BLOQUEADA: configure em Streamlit Secrets a variável "
-                "SETTA_MES_GENERAL_REPORT_VALIDATE_PIN com um código privado de "
-                "pelo menos 12 caracteres. Não utilize o token MES como código."
-            )
+            st.success("Nenhuma conexão exige atenção." if active else "Sem conexões verificadas.")
+    elif view == "Conexões":
+        term = st.text_input("Buscar conexão").strip().casefold()
+        status_filter = st.selectbox("Status", ["Todos", *sorted(set(statuses))])
+        filtered = [x for x in items if term in str(x[1].get("name") or "").casefold()
+                    and (status_filter == "Todos" or _api_status(x[1]) == status_filter)]
+        if filtered:
+            _setta_dataframe(pd.DataFrame(_status_rows(filtered)), width="stretch", hide_index=True)
         else:
-            digitado = st.text_input(
-                "CÓDIGO PRIVADO DE HOMOLOGAÇÃO", type="password",
-                key="mes_homologacao_pin",
+            st.info("Nenhuma conexão encontrada.")
+        ids = {str(item.get("id")) for category, item in filtered if category == "API"}
+        if ids:
+            _render_selected_api([api for api in apis if str(api.get("id")) in ids])
+        if st.toggle("Detalhes das integrações", key="monitor_integration_details"):
+            st.markdown(
+                '<div class="integration-grid">'
+                + "".join(ui_components.integration_card(item) for item in integrations)
+                + "</div>",
+                unsafe_allow_html=True,
             )
-            autorizado = hmac.compare_digest(digitado, chave_esperada)
-            arquivo_manual = None
-            if autorizado:
-                st.caption(
-                    "RECOMENDADO: utilize o Excel manual do mesmo dia da API. "
-                    "A fonte atualmente publicada na Central pode estar desatualizada."
-                )
-                arquivo_manual = st.file_uploader(
-                    "EXCEL MANUAL — RELATÓRIO GERAL (opcional)",
-                    type=["xlsx"], accept_multiple_files=False,
-                    key="mes_excel_homologacao_manual",
-                )
-                if arquivo_manual is not None:
-                    st.caption(
-                        "O arquivo será lido apenas nesta sessão para comparação. "
-                        "Não será enviado à Central nem publicado no MRP."
-                    )
-            if st.button(
-                "COLETAR E COMPARAR COM O RELATÓRIO ATUAL",
-                use_container_width=True, type="primary",
-                disabled=not autorizado, key="mes_homologar_agora",
-            ):
-                from mes_general_report_validation import coletar_e_comparar
-                with st.spinner("Lendo API MES e comparando a versão da Central de Dados..."):
-                    try:
-                        # O retorno contém apenas estatísticas; JSON MES não é
-                        # guardado no session_state, cache, banco ou navegador.
-                        resumo = coletar_e_comparar(
-                            excel_manual_bytes=(
-                                arquivo_manual.getvalue() if arquivo_manual is not None else None
-                            )
-                        )
-                        st.session_state["_mes_homologacao_resumo"] = resumo
-                        politica = resumo.get("politica_continuidade") or {}
-                        if politica.get("status") == "PROCESSAR_COM_RESSALVAS":
-                            st.warning(
-                                "Coleta concluída COM RESSALVAS. Os registros válidos estão "
-                                "aptos ao processamento; as exceções seguem em quarentena. "
-                                "Esta tela não publica ou sincroniza o MRP."
-                            )
-                        elif politica.get("status") == "PROTEGER_BASE":
-                            st.error(
-                                "Falha estrutural ou volumétrica: manter a última base "
-                                "válida e investigar antes de atualizar."
-                            )
-                        else:
-                            st.success("Comparação concluída — nenhuma fonte foi substituída.")
-                    except ValueError as exc:
-                        st.session_state.pop("_mes_homologacao_resumo", None)
-                        st.error(str(exc))
-                    except Exception:
-                        st.session_state.pop("_mes_homologacao_resumo", None)
-                        st.error("Não foi possível concluir a comparação. Verifique a disponibilidade da Central.")
-            resultado = st.session_state.get("_mes_homologacao_resumo")
-            if autorizado and resultado:
-                auditoria = resultado.get("auditoria") or {}
-                if auditoria:
-                    st.caption("AUDITORIA ESTRUTURAL DO JSON — SEM DADOS INDIVIDUAIS")
-                    a0, a1, a2, a3 = st.columns(4)
-                    a0.metric("Registros recebidos", auditoria["total_recebido"])
-                    a1.metric("Registros válidos", auditoria["registros_validos"])
-                    a2.metric("Pendências de dados", auditoria["registros_pendentes"])
-                    a3.metric("Linhas completamente vazias", auditoria["registros_vazios"])
-                    if auditoria["registros_pendentes"]:
-                        st.warning(
-                            "REGISTROS EM QUARENTENA: itens com inconsistências são "
-                            "isolados para correção; não são incluídos na demanda MRP."
-                        )
-                        if auditoria["sem_codigo_com_movimento"]:
-                            st.warning(
-                                f'{auditoria["sem_codigo_com_movimento"]} registro(s) sem código '
-                                "possuem quantidade positiva. Devem ser corrigidos na origem."
-                            )
-                        motivos = pd.DataFrame([
-                            {"Tipo de inconsistência": tipo, "Registros": qtd}
-                            for tipo, qtd in sorted(auditoria["motivos"].items())
-                        ])
-                        _setta_dataframe(motivos, use_container_width=True, hide_index=True)
-                        st.caption("Exemplos de posições com inconsistência — sem conteúdo sensível:")
-                        _setta_dataframe(pd.DataFrame(auditoria["exemplos"]),
-                                         use_container_width=True, hide_index=True)
-                        st.caption(auditoria["observacao"])
-                    elif auditoria["registros_vazios"]:
-                        st.info("Linhas totalmente vazias foram identificadas e contabilizadas.")
-                if resultado.get("auditoria_excel"):
-                    excel_aud = resultado["auditoria_excel"]
-                    st.caption(
-                        f'REFERÊNCIA: {resultado.get("referencia", "Excel manual")}. '
-                        f'Registros da referência: '
-                        f'{excel_aud["total_recebido"]} recebidos, '
-                        f'{excel_aud["registros_pendentes"]} em quarentena.'
-                    )
-                    if excel_aud["registros_pendentes"]:
-                        st.warning(
-                            "Também foram identificadas inconsistências na referência. "
-                            "As linhas sem chave ficam fora da comparação parcial, "
-                            "mas continuam impedindo a homologação integral."
-                        )
-                    if resultado.get("excecoes_correspondentes"):
-                        st.info(
-                            "As exceções presentes na API e na referência correspondem "
-                            "pelas informações disponíveis, sem considerar um código inexistente."
-                        )
-                    else:
-                        st.warning("As exceções entre API e referência não correspondem.")
-                politica = resultado.get("politica_continuidade") or {}
-                if politica:
-                    st.markdown("#### POLÍTICA DE CONTINUIDADE DA ATUALIZAÇÃO")
-                    status_operacional = politica["status"]
-                    if status_operacional == "PROCESSAR_COM_RESSALVAS":
-                        st.success(
-                            f'{politica["registros_validos"]:,} registros aptos ao processamento; '
-                            f'{politica["registros_em_quarentena"]:,} em quarentena para correção.'
-                        )
-                    elif status_operacional == "PROCESSAR":
-                        st.success("Dados estruturalmente aptos ao processamento.")
-                    else:
-                        st.error(
-                            "PROTEGER BASE ANTERIOR: anomalias volumosas ou estruturais "
-                            "exigem investigação."
-                        )
-                        for motivo in politica["motivos_protecao"]:
-                            st.caption(motivo)
-                    st.caption(
-                        "Avaliação técnica para futura sincronização. O Monitor "
-                        "continua em modo de homologação, sem publicar dados."
-                    )
-                if resultado.get("homologacao_bloqueada"):
-                    st.caption(resultado["observacao"])
-                if resultado.get("api") and resultado.get("excel"):
-                    base_mes = resultado["api"]
-                    base_excel = resultado["excel"]
-                    indicadores = (
-                        ("Linhas brutas", "linhas"), ("OPs distintas", "ops"),
-                        ("Códigos distintos", "produtos"),
-                        ("Pares OP + código", "op_produto"),
-                        ("Solicitações distintas", "solicitacoes_distintas"),
-                        ("Quantidade necessária", "necessidade"),
-                        ("Quantidade atendida", "atendimento"),
-                        ("Pendência", "pendencia"),
-                        ("Solicitações divergentes", "solicitacoes_divergentes"),
-                    )
-                    if resultado.get("comparacao_parcial"):
-                        st.warning(
-                            "COMPARAÇÃO COM RESSALVAS: totais abaixo consideram somente "
-                            "registros com chaves válidas. As exceções ficam em quarentena "
-                            "e não precisam impedir o processamento dos demais materiais."
-                        )
-                    tabela = pd.DataFrame([
-                        {"Indicador": label, "API MES": base_mes[key],
-                         "Relatório atual": base_excel[key],
-                         "Diferença (API − atual)": round(float(base_mes[key]) - float(base_excel[key]), 4)}
-                        for label, key in indicadores
-                    ])
-                    _setta_dataframe(tabela, use_container_width=True, hide_index=True)
-                    d = resultado["comparativo"]
-                    a, b, c, d_col = st.columns(4)
-                    a.metric("OP-produtos somente na API", d["somente_api"])
-                    b.metric("OP-produtos somente no Excel", d["somente_excel"])
-                    c.metric("Quantidades divergentes", d["quantidades_diferentes"])
-                    d_col.metric("Solicitações/datas divergentes", d["solicitacoes_por_data_diferentes"])
-                    detalhamento = resultado.get("diagnostico_diferencas") or {}
-                    if detalhamento:
-                        st.markdown("#### ORIGEM DAS DIFERENÇAS DE QUANTIDADE")
-                        st.caption(
-                            "Somente na API: contribuição das combinações OP/produto ausentes "
-                            "no Excel. Alteração nas chaves existentes: diferença entre "
-                            "quantidades das combinações presentes nas duas fontes."
-                        )
-                        _setta_dataframe(
-                            pd.DataFrame(detalhamento["diferencas_por_origem"]),
-                            use_container_width=True, hide_index=True,
-                        )
-                        st.markdown("#### DATAS DE SOLICITAÇÃO DAS COMBINAÇÕES EXCLUSIVAS DA API")
-                        if detalhamento["datas_solicitacoes_apenas_api"]:
-                            _setta_dataframe(
-                                pd.DataFrame(detalhamento["datas_solicitacoes_apenas_api"]),
-                                use_container_width=True, hide_index=True,
-                            )
-                        st.caption(
-                            f'Exibindo até 12 datas das '
-                            f'{detalhamento["total_datas_distintas_apenas_api"]} '
-                            "datas distintas encontradas."
-                        )
-                        st.caption(detalhamento["observacao_datas"])
-                    if resultado["iguais_no_criterio_comparado"]:
-                        st.success("Os valores e as chaves comparados coincidem. A fonte NÃO foi publicada.")
-                    else:
-                        st.warning("Existem divergências: manter o Excel até a investigação e homologação.")
-                    st.caption(resultado["criterio"])
-                    st.caption(resultado["observacao"])
-
-    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
-    section_band(
-        "02 · INTEGRAÇÕES",
-        "FLUXOS ENTRE APLICATIVOS",
-        "",
-    )
-    st.markdown(
-        '<div class="integration-grid">'
-        + "".join(ui_components.integration_card(item) for item in integrations)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
-    section_band(
-        "03 · COBERTURA",
-        "MAPA DE CONEXÕES",
-        "Origem, destino e local técnico de cada integração conhecida.",
-    )
-    coverage = pd.DataFrame(store.connection_coverage())
-    if not coverage.empty:
-        coverage = coverage.rename(
-            columns={
-                "connection": "CONEXÃO",
-                "source": "ORIGEM",
-                "target": "DESTINO",
-                "service": "SERVIÇO",
-                "resource": "RECURSO",
-                "code": "LOCAL DA CONEXÃO",
-                "monitoring": "MONITORAMENTO",
-            }
-        )
-        _setta_dataframe(
-            coverage,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "CONEXÃO": st.column_config.TextColumn(width="medium"),
-                "ORIGEM": st.column_config.TextColumn(width="medium"),
-                "DESTINO": st.column_config.TextColumn(width="medium"),
-                "SERVIÇO": st.column_config.TextColumn(width="medium"),
-                "RECURSO": st.column_config.TextColumn(width="large"),
-                "LOCAL DA CONEXÃO": st.column_config.TextColumn(width="large"),
-                "MONITORAMENTO": st.column_config.TextColumn(width="medium"),
-            },
-        )
-
-    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
-    section_band(
-        "04 · OCORRÊNCIAS",
-        "INCIDENTES RECENTES",
-        "",
-    )
-    incidents = store.list_incidents(limit=12)
-    for item in integrations:
-        if str(item.get("status")).upper() in {"OFFLINE", "ATENÇÃO"}:
-            incidents = [
-                {
-                    "started_at": item.get("last_activity_at"),
-                    "api_name": item.get("name"),
-                    "kind": "INTEGRAÇÃO",
-                    "status": "ABERTO",
-                    "resolved_at": None,
-                }
-            ] + incidents
-    for api in apis:
-        if api.get("system") and str(api.get("status")).upper() in {"OFFLINE", "ATENÇÃO"}:
-            incidents = [
-                {
-                    "started_at": api.get("last_check_at"),
-                    "api_name": api.get("name"),
-                    "kind": "STATUS ATUAL",
-                    "status": "ABERTO",
-                    "resolved_at": None,
-                }
-            ] + incidents
-    if incidents:
-        rows = ['<div class="table-card">']
-        rows.append(
-            '<div class="table-row table-head">'
-            '<div class="table-cell">Início</div><div class="table-cell">API</div>'
-            '<div class="table-cell">Tipo</div><div class="table-cell">Status</div>'
-            '<div class="table-cell">Fim</div></div>'
-        )
-        for incident in incidents:
-            status = str(incident.get("status") or "")
-            css = "event-error" if status == "ABERTO" else "event-ok"
-            rows.append(
-                '<div class="table-row">'
-                f'<div class="table-cell" data-label="Início">{store.format_dt(incident.get("started_at"))}</div>'
-                f'<div class="table-cell" data-label="API">{incident.get("api_name") or "—"}</div>'
-                f'<div class="table-cell" data-label="Tipo">{incident.get("kind") or "—"}</div>'
-                f'<div class="table-cell {css}" data-label="Status">{status}</div>'
-                f'<div class="table-cell" data-label="Fim">{store.format_dt(incident.get("resolved_at"))}</div>'
-                "</div>"
-            )
-        rows.append("</div>")
-        st.markdown("".join(rows), unsafe_allow_html=True)
+    elif view == "Incidentes":
+        incidents = store.list_incidents(limit=12)
+        if incidents:
+            rows = [{"Início": store.format_dt(item.get("started_at")), "Conexão": item.get("api_name") or "—",
+                     "Tipo": item.get("kind"), "Status": item.get("status"),
+                     "Fim": store.format_dt(item.get("resolved_at"))} for item in incidents]
+            _setta_dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        else:
+            st.info("Nenhum incidente registrado.")
     else:
-        st.success("Nenhum incidente registrado.")
+        if st.button("Verificar todas agora", type="primary", disabled=not bool(apis)):
+            with st.spinner("Verificando conexões..."):
+                monitor.run_all_checks()
+            st.session_state["_monitor_check_notice"] = "Verificação manual concluída."
+            st.rerun()
+        render_api_registration()
+        _render_selected_api(apis, maintenance=True)
+        tool = st.segmented_control("Ferramenta técnica", ["Mapa de conexões", "Homologação MES"], key="monitor_tool")
+        if tool == "Mapa de conexões":
+            coverage = pd.DataFrame(store.connection_coverage())
+            if not coverage.empty:
+                coverage = coverage.rename(
+                    columns={
+                        "connection": "CONEXÃO",
+                        "source": "ORIGEM",
+                        "target": "DESTINO",
+                        "service": "SERVIÇO",
+                        "resource": "RECURSO",
+                        "code": "LOCAL DA CONEXÃO",
+                        "monitoring": "MONITORAMENTO",
+                    }
+                )
+                _setta_dataframe(
+                    coverage,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "CONEXÃO": st.column_config.TextColumn(width="medium"),
+                        "ORIGEM": st.column_config.TextColumn(width="medium"),
+                        "DESTINO": st.column_config.TextColumn(width="medium"),
+                        "SERVIÇO": st.column_config.TextColumn(width="medium"),
+                        "RECURSO": st.column_config.TextColumn(width="large"),
+                        "LOCAL DA CONEXÃO": st.column_config.TextColumn(width="large"),
+                        "MONITORAMENTO": st.column_config.TextColumn(width="medium"),
+                    },
+                )
+        elif tool == "Homologação MES":
+            # Homologação controlada: resultado agregado, sem dados brutos, acesso
+            # apenas com um segundo segredo que NÃO é o token do serviço MES.
+            with st.expander("HOMOLOGAÇÃO — RELATÓRIO GERAL VIA API MES", expanded=False):
+                st.caption(
+                    "Busca o JSON completo uma única vez, compara com a última fonte "
+                    "normalizada Relatório Geral da Central e apresenta apenas indicadores "
+                    "agregados. NÃO substitui planilhas, não publica registros e não altera MRP."
+                )
+                chave_esperada = os.getenv("SETTA_MES_GENERAL_REPORT_VALIDATE_PIN", "")
+                if len(chave_esperada) < 12:
+                    st.info(
+                        "HOMOLOGAÇÃO BLOQUEADA: configure em Streamlit Secrets a variável "
+                        "SETTA_MES_GENERAL_REPORT_VALIDATE_PIN com um código privado de "
+                        "pelo menos 12 caracteres. Não utilize o token MES como código."
+                    )
+                else:
+                    digitado = st.text_input(
+                        "CÓDIGO PRIVADO DE HOMOLOGAÇÃO", type="password",
+                        key="mes_homologacao_pin",
+                    )
+                    autorizado = hmac.compare_digest(digitado, chave_esperada)
+                    arquivo_manual = None
+                    if autorizado:
+                        st.caption(
+                            "RECOMENDADO: utilize o Excel manual do mesmo dia da API. "
+                            "A fonte atualmente publicada na Central pode estar desatualizada."
+                        )
+                        arquivo_manual = st.file_uploader(
+                            "EXCEL MANUAL — RELATÓRIO GERAL (opcional)",
+                            type=["xlsx"], accept_multiple_files=False,
+                            key="mes_excel_homologacao_manual",
+                        )
+                        if arquivo_manual is not None:
+                            st.caption(
+                                "O arquivo será lido apenas nesta sessão para comparação. "
+                                "Não será enviado à Central nem publicado no MRP."
+                            )
+                    if st.button(
+                        "COLETAR E COMPARAR COM O RELATÓRIO ATUAL",
+                        use_container_width=True, type="primary",
+                        disabled=not autorizado, key="mes_homologar_agora",
+                    ):
+                        from mes_general_report_validation import coletar_e_comparar
+                        with st.spinner("Lendo API MES e comparando a versão da Central de Dados..."):
+                            try:
+                                # O retorno contém apenas estatísticas; JSON MES não é
+                                # guardado no session_state, cache, banco ou navegador.
+                                resumo = coletar_e_comparar(
+                                    excel_manual_bytes=(
+                                        arquivo_manual.getvalue() if arquivo_manual is not None else None
+                                    )
+                                )
+                                st.session_state["_mes_homologacao_resumo"] = resumo
+                                politica = resumo.get("politica_continuidade") or {}
+                                if politica.get("status") == "PROCESSAR_COM_RESSALVAS":
+                                    st.warning(
+                                        "Coleta concluída COM RESSALVAS. Os registros válidos estão "
+                                        "aptos ao processamento; as exceções seguem em quarentena. "
+                                        "Esta tela não publica ou sincroniza o MRP."
+                                    )
+                                elif politica.get("status") == "PROTEGER_BASE":
+                                    st.error(
+                                        "Falha estrutural ou volumétrica: manter a última base "
+                                        "válida e investigar antes de atualizar."
+                                    )
+                                else:
+                                    st.success("Comparação concluída — nenhuma fonte foi substituída.")
+                            except ValueError as exc:
+                                st.session_state.pop("_mes_homologacao_resumo", None)
+                                st.error(str(exc))
+                            except Exception:
+                                st.session_state.pop("_mes_homologacao_resumo", None)
+                                st.error("Não foi possível concluir a comparação. Verifique a disponibilidade da Central.")
+                    resultado = st.session_state.get("_mes_homologacao_resumo")
+                    if autorizado and resultado:
+                        auditoria = resultado.get("auditoria") or {}
+                        if auditoria:
+                            st.caption("AUDITORIA ESTRUTURAL DO JSON — SEM DADOS INDIVIDUAIS")
+                            a0, a1, a2, a3 = st.columns(4)
+                            a0.metric("Registros recebidos", auditoria["total_recebido"])
+                            a1.metric("Registros válidos", auditoria["registros_validos"])
+                            a2.metric("Pendências de dados", auditoria["registros_pendentes"])
+                            a3.metric("Linhas completamente vazias", auditoria["registros_vazios"])
+                            if auditoria["registros_pendentes"]:
+                                st.warning(
+                                    "REGISTROS EM QUARENTENA: itens com inconsistências são "
+                                    "isolados para correção; não são incluídos na demanda MRP."
+                                )
+                                if auditoria["sem_codigo_com_movimento"]:
+                                    st.warning(
+                                        f'{auditoria["sem_codigo_com_movimento"]} registro(s) sem código '
+                                        "possuem quantidade positiva. Devem ser corrigidos na origem."
+                                    )
+                                motivos = pd.DataFrame([
+                                    {"Tipo de inconsistência": tipo, "Registros": qtd}
+                                    for tipo, qtd in sorted(auditoria["motivos"].items())
+                                ])
+                                _setta_dataframe(motivos, use_container_width=True, hide_index=True)
+                                st.caption("Exemplos de posições com inconsistência — sem conteúdo sensível:")
+                                _setta_dataframe(pd.DataFrame(auditoria["exemplos"]),
+                                                 use_container_width=True, hide_index=True)
+                                st.caption(auditoria["observacao"])
+                            elif auditoria["registros_vazios"]:
+                                st.info("Linhas totalmente vazias foram identificadas e contabilizadas.")
+                        if resultado.get("auditoria_excel"):
+                            excel_aud = resultado["auditoria_excel"]
+                            st.caption(
+                                f'REFERÊNCIA: {resultado.get("referencia", "Excel manual")}. '
+                                f'Registros da referência: '
+                                f'{excel_aud["total_recebido"]} recebidos, '
+                                f'{excel_aud["registros_pendentes"]} em quarentena.'
+                            )
+                            if excel_aud["registros_pendentes"]:
+                                st.warning(
+                                    "Também foram identificadas inconsistências na referência. "
+                                    "As linhas sem chave ficam fora da comparação parcial, "
+                                    "mas continuam impedindo a homologação integral."
+                                )
+                            if resultado.get("excecoes_correspondentes"):
+                                st.info(
+                                    "As exceções presentes na API e na referência correspondem "
+                                    "pelas informações disponíveis, sem considerar um código inexistente."
+                                )
+                            else:
+                                st.warning("As exceções entre API e referência não correspondem.")
+                        politica = resultado.get("politica_continuidade") or {}
+                        if politica:
+                            st.markdown("#### POLÍTICA DE CONTINUIDADE DA ATUALIZAÇÃO")
+                            status_operacional = politica["status"]
+                            if status_operacional == "PROCESSAR_COM_RESSALVAS":
+                                st.success(
+                                    f'{politica["registros_validos"]:,} registros aptos ao processamento; '
+                                    f'{politica["registros_em_quarentena"]:,} em quarentena para correção.'
+                                )
+                            elif status_operacional == "PROCESSAR":
+                                st.success("Dados estruturalmente aptos ao processamento.")
+                            else:
+                                st.error(
+                                    "PROTEGER BASE ANTERIOR: anomalias volumosas ou estruturais "
+                                    "exigem investigação."
+                                )
+                                for motivo in politica["motivos_protecao"]:
+                                    st.caption(motivo)
+                            st.caption(
+                                "Avaliação técnica para futura sincronização. O Monitor "
+                                "continua em modo de homologação, sem publicar dados."
+                            )
+                        if resultado.get("homologacao_bloqueada"):
+                            st.caption(resultado["observacao"])
+                        if resultado.get("api") and resultado.get("excel"):
+                            base_mes = resultado["api"]
+                            base_excel = resultado["excel"]
+                            indicadores = (
+                                ("Linhas brutas", "linhas"), ("OPs distintas", "ops"),
+                                ("Códigos distintos", "produtos"),
+                                ("Pares OP + código", "op_produto"),
+                                ("Solicitações distintas", "solicitacoes_distintas"),
+                                ("Quantidade necessária", "necessidade"),
+                                ("Quantidade atendida", "atendimento"),
+                                ("Pendência", "pendencia"),
+                                ("Solicitações divergentes", "solicitacoes_divergentes"),
+                            )
+                            if resultado.get("comparacao_parcial"):
+                                st.warning(
+                                    "COMPARAÇÃO COM RESSALVAS: totais abaixo consideram somente "
+                                    "registros com chaves válidas. As exceções ficam em quarentena "
+                                    "e não precisam impedir o processamento dos demais materiais."
+                                )
+                            tabela = pd.DataFrame([
+                                {"Indicador": label, "API MES": base_mes[key],
+                                 "Relatório atual": base_excel[key],
+                                 "Diferença (API − atual)": round(float(base_mes[key]) - float(base_excel[key]), 4)}
+                                for label, key in indicadores
+                            ])
+                            _setta_dataframe(tabela, use_container_width=True, hide_index=True)
+                            d = resultado["comparativo"]
+                            a, b, c, d_col = st.columns(4)
+                            a.metric("OP-produtos somente na API", d["somente_api"])
+                            b.metric("OP-produtos somente no Excel", d["somente_excel"])
+                            c.metric("Quantidades divergentes", d["quantidades_diferentes"])
+                            d_col.metric("Solicitações/datas divergentes", d["solicitacoes_por_data_diferentes"])
+                            detalhamento = resultado.get("diagnostico_diferencas") or {}
+                            if detalhamento:
+                                st.markdown("#### ORIGEM DAS DIFERENÇAS DE QUANTIDADE")
+                                st.caption(
+                                    "Somente na API: contribuição das combinações OP/produto ausentes "
+                                    "no Excel. Alteração nas chaves existentes: diferença entre "
+                                    "quantidades das combinações presentes nas duas fontes."
+                                )
+                                _setta_dataframe(
+                                    pd.DataFrame(detalhamento["diferencas_por_origem"]),
+                                    use_container_width=True, hide_index=True,
+                                )
+                                st.markdown("#### DATAS DE SOLICITAÇÃO DAS COMBINAÇÕES EXCLUSIVAS DA API")
+                                if detalhamento["datas_solicitacoes_apenas_api"]:
+                                    _setta_dataframe(
+                                        pd.DataFrame(detalhamento["datas_solicitacoes_apenas_api"]),
+                                        use_container_width=True, hide_index=True,
+                                    )
+                                st.caption(
+                                    f'Exibindo até 12 datas das '
+                                    f'{detalhamento["total_datas_distintas_apenas_api"]} '
+                                    "datas distintas encontradas."
+                                )
+                                st.caption(detalhamento["observacao_datas"])
+                            if resultado["iguais_no_criterio_comparado"]:
+                                st.success("Os valores e as chaves comparados coincidem. A fonte NÃO foi publicada.")
+                            else:
+                                st.warning("Existem divergências: manter o Excel até a investigação e homologação.")
+                            st.caption(resultado["criterio"])
+                            st.caption(resultado["observacao"])
+
 
 
 def _render_mes_report_card(source: dict, mes_api: dict, treated_base: dict | None = None) -> None:
@@ -970,221 +858,8 @@ def _render_mes_report_card(source: dict, mes_api: dict, treated_base: dict | No
                 st.info(msg)
 
 
-def render_database() -> None:
-    render_header(
-        "BANCO DE DADOS | SETTA",
-        "Fontes • Processamentos • Alimentação",
-        "CENTRAL DE DADOS",
-    )
-
-    sources = store.list_sources()
-    derived = store.list_derived_bases()
-
-    # MATERIAIS é uma carga ativa da Gestão de Entregas, não uma linha
-    # de setta_derived_bases. Complementa o cartão pela integração oficial.
-    try:
-        integration_rows = store.central_api_call(
-            "integration_status",
-            {},
-            timeout=30,
-        ).get("data") or []
-        materials_info = next(
-            (
-                row for row in integration_rows
-                if isinstance(row, dict)
-                and str(row.get("id") or "") == "entregas-nfs"
-            ),
-            {},
-        )
-    except Exception:
-        materials_info = {}
-
-    if materials_info:
-        for base in derived:
-            if base.get("key") != "materiais_api":
-                continue
-            activity = materials_info.get("last_activity_at")
-            activity_dt = store.parse_dt(activity)
-            if activity_dt is None:
-                materials_status = "PENDENTE"
-            elif activity_dt.date() < datetime.now(store.TZ).date():
-                materials_status = "DESATUALIZADO"
-            else:
-                materials_status = "ATUALIZADO"
-            base["status"] = materials_status
-            base["mode"] = f"API {materials_status}"
-            base["processed_at"] = activity
-            base["processed_label"] = store.format_dt(activity)
-            base["rows_count"] = int(materials_info.get("rows_count") or 0)
-            base["available"] = True
-            base["version_label"] = materials_info.get("version_label") or ""
-
-    updated = sum(
-        1
-        for item in sources
-        if str(item.get("status")).upper() in {"ATUALIZADO", "SEM ALTERAÇÃO"}
-    )
-
-    # Ler o estado real persistido no backend, não apenas o catálogo estático.
-    # O catálogo não inclui last_http_status/last_success_at; por isso o
-    # cartão MES mostrava "RECEPTOR SEM VERIFICAÇÃO" apesar de HTTP 200.
-    system_status = monitor.hydrate_all(store.list_apis(include_demo=False))
-    pmp_receptor = next(
-        (
-            api for api in system_status
-            if str(api.get("id") or "") == "11111111-1111-4111-8111-111111111119"
-        ),
-        {},
-    )
-    for source in sources:
-        if source.get("source_key") == "pmp":
-            source["api_health"] = str(pmp_receptor.get("status") or "").upper()
-
-    active_apis = sum(
-        1
-        for item in system_status
-        if str(item.get("status")).upper() == "ONLINE"
-    )
-
-    kpi_grid(
-        [
-            {
-                "label": "Fontes de origem",
-                "value": len(sources),
-                "note": "",
-                "accent": "#111827",
-            },
-            {
-                "label": "Atualizadas",
-                "value": updated,
-                "note": "",
-                "accent": "#22c55e",
-            },
-            {
-                "label": "Bases derivadas",
-                "value": len(derived),
-                "note": "",
-                "accent": "#64748b",
-            },
-            {
-                "label": "APIs ativas",
-                "value": active_apis,
-                "note": "",
-                "accent": "#2563eb",
-            },
-        ]
-    )
-
-    section_band(
-        "01 · ORIGEM",
-        "FONTES DE DADOS",
-        "",
-    )
-    normalized = [
-        {
-            **source,
-            "last_update_label": store.format_dt(
-                source.get("last_received_at")
-                or source.get("last_update_at")
-            ),
-            "content_update_label": store.format_dt(
-                source.get("last_update_at")
-            ),
-        }
-        for source in sources
-    ]
-    mes_receptor = next(
-        (
-            api for api in system_status
-            if str(api.get("id") or "") == "11111111-1111-4111-8111-111111111120"
-        ),
-        {},
-    )
-    # Os demais cartões mantêm o componente de origem atual.
-    # Relatório Geral recebe um cartão nativo Streamlit para que o botão
-    # seja realmente clicável dentro dele, não ao final das 14 fontes.
-    for position in range(0, len(normalized), 2):
-        cols = st.columns(2, gap="medium")
-        for offset, source in enumerate(normalized[position:position + 2]):
-            with cols[offset]:
-                if source.get("source_key") == "relatorio_geral":
-                    _render_mes_report_card(
-                        source, mes_receptor,
-                        next((x for x in derived if x.get("key") == "relatorio_geral_tratado"), {})
-                    )
-                else:
-                    st.markdown(
-                        source_card(source),
-                        unsafe_allow_html=True,
-                    )
-
-    normalizadas = [
-        item for item in sources
-        if str(item.get("normalized_storage_path") or "").strip()
-    ]
-    pendentes_normalizacao = [
-        item for item in sources
-        if bool(item.get("available"))
-        and not str(item.get("normalized_storage_path") or "").strip()
-    ]
-    st.caption(
-        f"FORMATO TÉCNICO · {len(normalizadas)}/{len([x for x in sources if x.get('available')])} "
-        "fonte(s) disponível(is) normalizada(s) em SETTA_SOURCE_V1."
-    )
-    if pendentes_normalizacao:
-        if st.button(
-            "NORMALIZAR FONTES EXISTENTES",
-            use_container_width=True,
-            key="normalize_existing_sources",
-        ):
-            progress = st.progress(0)
-            status = st.empty()
-            ok = []
-            failed = []
-            total_pending = len(pendentes_normalizacao)
-            for idx, source in enumerate(pendentes_normalizacao, start=1):
-                key = str(source.get("source_key") or "")
-                status.write(f"Normalizando {source.get('name') or key}...")
-                try:
-                    store.backfill_normalized_source(key)
-                    ok.append(source.get("name") or key)
-                except Exception as exc:
-                    failed.append((source.get("name") or key, str(exc)))
-                progress.progress(idx / total_pending)
-            status.empty()
-            progress.empty()
-            if ok:
-                st.success(
-                    f"{len(ok)} fonte(s) normalizada(s): " + " • ".join(map(str, ok))
-                )
-            if failed:
-                st.error(
-                    "Falha em: "
-                    + " • ".join(f"{name} — {error}" for name, error in failed)
-                )
-            if ok and not failed:
-                st.rerun()
-
-    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
-    section_band(
-        "02 · PROCESSAMENTO",
-        "BASES DERIVADAS",
-        "",
-    )
-    st.markdown(
-        '<div class="derived-grid">'
-        + "".join(derived_card(base) for base in derived)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
-    section_band(
-        "03 · ALIMENTAÇÃO",
-        "ATUALIZAR FONTE",
-        "",
-    )
-
+def _render_feeding(sources):
+    section_band("01 · ALIMENTAÇÃO", "Enviar arquivos", "")
     source_map = {
         f"{item['name']} · {item['source_system']}": item
         for item in sources
@@ -1366,13 +1041,97 @@ def render_database() -> None:
                 )
                 st.rerun()
 
-    st.markdown('<div class="topic-divider"></div>', unsafe_allow_html=True)
-    section_band(
-        "04 · PADRÃO SETTA",
-        "IDENTIDADE VISUAL GLOBAL",
-        "",
-    )
 
+def _derived_with_materials():
+    derived = store.list_derived_bases()
+
+    # MATERIAIS é uma carga ativa da Gestão de Entregas, não uma linha
+    # de setta_derived_bases. Complementa o cartão pela integração oficial.
+    try:
+        integration_rows = store.central_api_call(
+            "integration_status",
+            {},
+            timeout=30,
+        ).get("data") or []
+        materials_info = next(
+            (
+                row for row in integration_rows
+                if isinstance(row, dict)
+                and str(row.get("id") or "") == "entregas-nfs"
+            ),
+            {},
+        )
+    except Exception:
+        materials_info = {}
+
+    if materials_info:
+        for base in derived:
+            if base.get("key") != "materiais_api":
+                continue
+            activity = materials_info.get("last_activity_at")
+            activity_dt = store.parse_dt(activity)
+            if activity_dt is None:
+                materials_status = "PENDENTE"
+            elif activity_dt.date() < datetime.now(store.TZ).date():
+                materials_status = "DESATUALIZADO"
+            else:
+                materials_status = "ATUALIZADO"
+            base["status"] = materials_status
+            base["mode"] = f"API {materials_status}"
+            base["processed_at"] = activity
+            base["processed_label"] = store.format_dt(activity)
+            base["rows_count"] = int(materials_info.get("rows_count") or 0)
+            base["available"] = True
+            base["version_label"] = materials_info.get("version_label") or ""
+    return derived
+
+
+def _render_database_maintenance(sources):
+    section_band("Manutenção", "Normalização", "")
+    pendentes_normalizacao = [
+        item for item in sources
+        if bool(item.get("available"))
+        and not str(item.get("normalized_storage_path") or "").strip()
+    ]
+    if pendentes_normalizacao:
+        if st.button(
+            "NORMALIZAR FONTES EXISTENTES",
+            use_container_width=True,
+            key="normalize_existing_sources",
+        ):
+            progress = st.progress(0)
+            status = st.empty()
+            ok = []
+            failed = []
+            total_pending = len(pendentes_normalizacao)
+            for idx, source in enumerate(pendentes_normalizacao, start=1):
+                key = str(source.get("source_key") or "")
+                status.write(f"Normalizando {source.get('name') or key}...")
+                try:
+                    store.backfill_normalized_source(key)
+                    ok.append(source.get("name") or key)
+                except Exception as exc:
+                    failed.append((source.get("name") or key, str(exc)))
+                progress.progress(idx / total_pending)
+            status.empty()
+            progress.empty()
+            if ok:
+                st.success(
+                    f"{len(ok)} fonte(s) normalizada(s): " + " • ".join(map(str, ok))
+                )
+            if failed:
+                st.error(
+                    "Falha em: "
+                    + " • ".join(f"{name} — {error}" for name, error in failed)
+                )
+            if ok and not failed:
+                st.rerun()
+    else:
+        st.caption("Nenhuma fonte pendente de normalização.")
+
+    if not st.toggle("Editar identidade visual global", key="monitor_global_branding"):
+        return
+    section_band("Manutenção", "Identidade visual global", "")
     current_logo = logo_html(
         str(VISUAL_CONFIG.get("logo_data") or ""),
         str(VISUAL_CONFIG.get("logo_mime") or "image/svg+xml"),
@@ -1435,11 +1194,63 @@ def render_database() -> None:
         st.rerun()
 
 
+def render_database() -> None:
+    render_header("BANCO DE DADOS | SETTA", "Alimentação e situação das fontes", "CENTRAL DE DADOS")
+    sources = store.list_sources()
+    _render_feeding(sources)
+
+    view = st.segmented_control("Consultar dados", ["Fontes", "Bases derivadas", "Manutenção"],
+                                default="Fontes", required=True, key="monitor_db_view")
+    if view == "Manutenção":
+        _render_database_maintenance(sources)
+        return
+    items = sources if view == "Fontes" else _derived_with_materials()
+    term = st.text_input("Buscar fonte ou base", key=f"monitor_data_search_{view}").strip().casefold()
+    options = sorted({str(item.get("status") or "AGUARDANDO") for item in items})
+    selected_status = st.selectbox("Status da carga", ["Todos", *options], key=f"monitor_data_status_{view}")
+    shown = [item for item in items if term in str(item.get("name") or "").casefold()
+             and (selected_status == "Todos" or str(item.get("status") or "AGUARDANDO") == selected_status)]
+    if not shown:
+        st.info("Nenhuma fonte ou base corresponde aos filtros.")
+        return
+    _setta_dataframe(pd.DataFrame([
+        {"Nome": item.get("name") or "—", "Status": item.get("status") or "AGUARDANDO",
+         "Última carga": store.format_dt(item.get("last_update_at") or item.get("processed_at"))}
+        for item in shown
+    ]), width="stretch", hide_index=True)
+    key_name = "source_key" if view == "Fontes" else "key"
+    by_key = {item[key_name]: item for item in shown if item.get(key_name)}
+    chosen = st.selectbox("Ver detalhes", list(by_key), index=None,
+                          format_func=lambda key: by_key[key]["name"],
+                          placeholder="Selecione uma fonte ou base", key=f"monitor_data_detail_{view}")
+    if not chosen:
+        return
+    selected = by_key[chosen]
+    if view == "Bases derivadas":
+        st.markdown(derived_card(selected), unsafe_allow_html=True)
+        return
+    selected = {
+        **selected,
+        "last_update_label": store.format_dt(selected.get("last_received_at") or selected.get("last_update_at")),
+        "content_update_label": store.format_dt(selected.get("last_update_at")),
+    }
+    if chosen == "relatorio_geral":
+        # Usa o estado persistido, sem ler a série de 24 horas de todas as APIs.
+        mes_receptor = next((api for api in store.list_apis(include_demo=False)
+                             if api.get("health_mode") == "MES_GENERAL_REPORT"), {})
+        treated = next((base for base in store.list_derived_bases()
+                        if base.get("key") == "relatorio_geral_tratado"), {})
+        _render_mes_report_card(selected, mes_receptor, treated)
+    else:
+        if chosen == "pmp":
+            pmp = next((api for api in store.list_apis(include_demo=False)
+                        if str(api.get("id") or "") == "11111111-1111-4111-8111-111111111119"), {})
+            selected["api_health"] = _api_status(pmp) if pmp else ""
+        st.markdown(source_card(selected), unsafe_allow_html=True)
+
+
 page = render_sidebar()
-ui_components.render_setta_shell(
-    str(VISUAL_CONFIG.get("logo_data") or ""),
-    str(VISUAL_CONFIG.get("logo_mime") or "image/svg+xml"),
-)
+ui_components.render_setta_shell()
 
 if page == "MONITOR DE APIs":
     render_monitor()

@@ -48,11 +48,11 @@ class MesCardTests(unittest.TestCase):
         )
         db_source = ast.get_source_segment(source, database)
         self.assertIn(
-            "monitor.hydrate_all(store.list_apis(include_demo=False))",
+            "for api in store.list_apis(include_demo=False)",
             db_source,
         )
         self.assertNotIn(
-            "monitor.hydrate_all(store.system_apis())",
+            "monitor.hydrate_all(",
             db_source,
         )
 
