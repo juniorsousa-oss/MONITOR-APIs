@@ -1216,6 +1216,7 @@ def render_database() -> None:
             "COMPRAS",
             "TCTP",
             "MOVIMENTAÇÃO",
+            "FECHAMENTO MENSAL",
         ],
         horizontal=True,
         key="central_feed_preset",
@@ -1227,6 +1228,7 @@ def render_database() -> None:
         "COMPRAS": {"sc", "pc", "pre_nota"},
         "TCTP": {"pmp", "h001"},
         "MOVIMENTAÇÃO": {"movimentacao"},
+        "FECHAMENTO MENSAL": {"ops", "kardex_s2", "kardex_ep", "kardex_e2"},
     }
 
     default_labels = []
