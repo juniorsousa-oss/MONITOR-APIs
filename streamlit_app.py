@@ -857,46 +857,23 @@ def _render_feeding(sources):
     if receipt := st.session_state.pop("_central_feed_receipt", None):
         st.success(receipt)
 
-    preset = st.radio(
-        "PACOTE DE ALIMENTAÇÃO",
-        [
-            "PERSONALIZADO",
-            "PRÉ-NOTAS MES",
-            "RELATÓRIO GERAL",
-            "ESTOQUE",
-            "COMPRAS",
-            "TCTP",
-            "FECHAMENTO MENSAL",
-        ],
-        horizontal=True,
-        key="central_feed_preset",
+    mode = st.segmented_control(
+        "Tipo de envio", ["PRÉ-NOTAS MES", "ENVIO MANUAL"],
+        default="PRÉ-NOTAS MES", required=True, key="central_feed_mode",
+        label_visibility="collapsed",
     )
-
-    preset_keys = {
-        "RELATÓRIO GERAL": {"relatorio_geral", "for001", "for022"},
-        "ESTOQUE": {"analitico", "endereco"},
-        "COMPRAS": {"sc", "pc", "pre_nota"},
-        "TCTP": {"pmp", "h001"},
-    }
-
-    if preset == "PRÉ-NOTAS MES":
+    if mode == "PRÉ-NOTAS MES":
         selected_sources = [item for item in sources if item.get("source_key") == "mes_pre_notas"]
         st.caption("Conferência de nota fiscal no MES · sem filtro de data · status Pré-nota lançada.")
-    elif preset == "FECHAMENTO MENSAL":
-        selected_sources = store.closing_source_fields(sources)
-        st.caption("Envie as quatro fontes aqui. O Fechamento Mensal lê os JSONs pela Central.")
     else:
-        default_labels = [
-            label for label, item in source_map.items()
-            if item.get("source_key") in preset_keys.get(preset, set())
-        ]
+        manual = {label: item for label, item in source_map.items()
+                  if item.get("source_key") != "mes_pre_notas"}
         selected_labels = st.multiselect(
-            "FONTES A ATUALIZAR",
-            list(source_map.keys()),
-            default=default_labels,
-            key=f"central_source_multi_{preset}",
+            "FONTES A ATUALIZAR", list(manual),
+            placeholder="Selecione as fontes para enviar",
+            key="central_feed_manual_sources",
         )
-        selected_sources = [source_map[label] for label in selected_labels]
+        selected_sources = [manual[label] for label in selected_labels]
     uploads = {}
 
     for source in selected_sources:
