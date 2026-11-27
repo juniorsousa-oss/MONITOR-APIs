@@ -8,6 +8,7 @@ import os
 import posixpath
 import re
 import time
+import unicodedata
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
