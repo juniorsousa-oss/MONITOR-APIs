@@ -1228,26 +1228,23 @@ def render_database() -> None:
         "COMPRAS": {"sc", "pc", "pre_nota"},
         "TCTP": {"pmp", "h001"},
         "MOVIMENTAÇÃO": {"movimentacao"},
-        "FECHAMENTO MENSAL": {"ops", "kardex_s2", "kardex_ep", "kardex_e2"},
     }
 
-    default_labels = []
-    if preset != "PERSONALIZADO":
-        wanted = preset_keys[preset]
+    if preset == "FECHAMENTO MENSAL":
+        selected_sources = store.closing_source_fields(sources)
+        st.caption("Envie as quatro fontes aqui. O Fechamento Mensal lê os JSONs pela Central.")
+    else:
         default_labels = [
-            label
-            for label, item in source_map.items()
-            if item.get("source_key") in wanted
+            label for label, item in source_map.items()
+            if item.get("source_key") in preset_keys.get(preset, set())
         ]
-
-    selected_labels = st.multiselect(
-        "FONTES A ATUALIZAR",
-        list(source_map.keys()),
-        default=default_labels,
-        key=f"central_source_multi_{preset}",
-    )
-
-    selected_sources = [source_map[label] for label in selected_labels]
+        selected_labels = st.multiselect(
+            "FONTES A ATUALIZAR",
+            list(source_map.keys()),
+            default=default_labels,
+            key=f"central_source_multi_{preset}",
+        )
+        selected_sources = [source_map[label] for label in selected_labels]
     uploads = {}
 
     for source in selected_sources:
@@ -1258,7 +1255,8 @@ def render_database() -> None:
         )
         uploaded = st.file_uploader(
             f"ARQUIVO — {source['name']}",
-            type=["xlsx", "xls", "xlsm", "xltx", "csv", "xml", "txt", "json"],
+            type=(["xlsx", "xltx"] if source_key in store.CLOSING_MOVEMENT_KEYS else
+                  ["xlsx", "xls", "xlsm", "xltx", "csv", "xml", "txt", "json"]),
             accept_multiple_files=False,
             key=f"central_batch_upload_{source_key}",
             label_visibility="collapsed",
