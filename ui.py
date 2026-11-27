@@ -447,7 +447,7 @@ def source_card(source: dict) -> str:
     )
     versao = (
         f' · Versão <b>{int(source.get("version") or 0)}</b>'
-        if source.get("api_active")
+        if source.get("version")
         else ""
     )
     api_health = str(source.get("api_health") or "").upper()

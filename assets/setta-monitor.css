@@ -143,3 +143,15 @@ body:has(.setta-shell-marker) [data-testid="stMain"] button[data-testid*="primar
 .monitor-page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .monitor-page-head .system-pill{margin-top:12px}
 @media(max-width:700px){.monitor-page-head{gap:4px}.monitor-page-head .system-pill{margin-top:0}}
+/* Compacta a consulta sem reduzir alvos de toque. */
+.stApp [data-testid="stMainBlockContainer"] [data-testid="stBaseButton-primary"]{
+ background:#ffbb00!important;border-color:#d7a000!important;color:#302400!important;
+ font-weight:700;min-height:40px
+}
+.stApp [data-testid="stMainBlockContainer"] [data-testid="stBaseButton-primary"]:hover:not(:disabled){
+ background:#ffc940!important;border-color:#b28600!important
+}
+.stApp [data-testid="stMainBlockContainer"] [data-testid="stBaseButton-primary"]:disabled{
+ background:#f0f1f3!important;border-color:#dadde2!important;color:#6b7280!important
+}
+.stApp [data-testid="stFileUploaderDropzone"]{padding:10px 12px}
