@@ -1,11 +1,12 @@
-name: SETTA MES GeneralReport — 07h20 + recuperação automática
+name: SETTA MES GeneralReport — recuperação da rotina 06h
 on:
   schedule:
     # Horário de Brasília (UTC−03): 10:20 UTC = 07:20 BRT.
     # GitHub Actions pode atrasar horas. Tentativas de recuperação alternadas
     # evitam depender de um único evento de schedule.
-    # A rotina --scheduled só consulta a MES após 07:20 BRT e ainda não
-    # conferida hoje; execuções redundantes terminam sem baixar a fonte.
+    # A rotina das 06:00 BRT aciona pelo Monitor depois dos arquivos.
+    # A recuperação consulta o MES após 07:20 BRT somente quando falta
+    # um recibo normalizado válido desde 06:00 BRT.
     - cron: '20 10 * * *'
     - cron: '17 */2 * * *'
   workflow_dispatch:

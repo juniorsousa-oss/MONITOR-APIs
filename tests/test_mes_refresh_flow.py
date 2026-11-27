@@ -50,6 +50,25 @@ class ScheduledMesTests(TestCase):
         self.assertFalse(allowed)
         self.assertEqual(label, "JA_CONFERIDO_HOJE")
 
+    def test_recibo_das_0600_evitaria_segunda_consulta_as_0720(self):
+        for receipt in ("2026-11-23T09:00:00Z", "2026-11-23T06:18:00-03:00"):
+            with self.subTest(receipt=receipt):
+                result = cron_deve_atualizar(
+                    {"normalized_available": True, "last_received_at": receipt,
+                     "last_update_at": "2026-11-22T09:00:00Z"},
+                    now=datetime(2026, 11, 23, 7, 20, tzinfo=TZ),
+                )
+                self.assertEqual(result, (False, "JA_CONFERIDO_HOJE"))
+
+    def test_recibos_antes_da_rotina_ou_do_futuro_nao_bloqueiam_recuperacao(self):
+        for receipt in ("2026-11-23T08:59:59Z", "2026-11-23T10:20:01Z"):
+            with self.subTest(receipt=receipt):
+                result = cron_deve_atualizar(
+                    {"normalized_available": True, "last_received_at": receipt},
+                    now=datetime(2026, 11, 23, 7, 20, tzinfo=TZ),
+                )
+                self.assertEqual(result, (True, "ATUALIZAR"))
+
     def test_arquivo_bruto_sem_normalizacao_exige_recuperacao(self):
         source = {
             "normalized_available": False,

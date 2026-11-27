@@ -1,7 +1,9 @@
-"""Testes da carga MES 07h20. Sem acesso à API real e sem publicar no Supabase."""
+"""Testes da carga MES. Sem acesso à API real e sem publicar no Supabase."""
 from __future__ import annotations
 
+from io import BytesIO
 import json
+from zipfile import ZipFile
 import os
 import unittest
 from unittest.mock import patch
@@ -83,6 +85,9 @@ class IngestaoTests(unittest.TestCase):
         self.assertEqual(first["status"], "PROCESSAR")
         self.assertEqual(first["sha256"], second["sha256"])
         self.assertEqual(first["arquivo"], second["arquivo"])
+        with ZipFile(BytesIO(first["arquivo"])) as workbook:
+            self.assertIn(b">2000-01-01T00:00:00Z</dcterms:modified>",
+                          workbook.read("docProps/core.xml"))
 
     def test_api_batch_gera_coluna_lote_sem_perder_zeros_iniciais(self):
         from io import BytesIO

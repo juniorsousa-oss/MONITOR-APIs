@@ -10,20 +10,23 @@ from time import monotonic
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("America/Sao_Paulo")
-BUSINESS_CUTOFF = time(7, 20)
+DAILY_ROUTINE_START = time(6, 0)
+RECOVERY_START = time(7, 20)
+DAILY_ROUTINE_LABEL = DAILY_ROUTINE_START.strftime("%H:%M")
 
 
 def cron_deve_atualizar(source: dict, *, now: datetime | None = None) -> tuple[bool, str]:
-    """Cron redundante: processar só depois das 07:20 e uma vez por dia.
+    """A recuperação das 07:20 só consulta se a rotina das 06:00 não confirmou a fonte.
 
-    Eventuais atrasos do scheduler não geram novas versões por repetição;
-    uma fonte sem normalização concluída sempre pode ser recuperada.
+    A rotina principal envia os arquivos manuais antes de acionar a API.
+    A janela de recuperação não pode disputar com esse início. Um recibo
+    sem normalização concluída não impede a recuperação.
     """
     now = now or datetime.now(TZ)
     if now.tzinfo is None:
         now = now.replace(tzinfo=TZ)
     now = now.astimezone(TZ)
-    if now.time() < BUSINESS_CUTOFF:
+    if now.time() < RECOVERY_START:
         return False, "ANTES_DA_JANELA_0720"
     if source.get("normalized_available"):
         raw = source.get("last_received_at") or source.get("last_update_at")
@@ -34,7 +37,8 @@ def cron_deve_atualizar(source: dict, *, now: datetime | None = None) -> tuple[b
                     received = received.replace(tzinfo=TZ)
                 received = received.astimezone(TZ)
                 if (received.date() == now.date()
-                        and received.time() >= BUSINESS_CUTOFF):
+                        and received.time() >= DAILY_ROUTINE_START
+                        and received <= now):
                     return False, "JA_CONFERIDO_HOJE"
             except (TypeError, ValueError):
                 pass
