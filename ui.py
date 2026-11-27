@@ -4,7 +4,6 @@ import base64
 import html
 from pathlib import Path
 from functools import lru_cache
-from urllib.parse import quote
 
 import streamlit as st
 
@@ -154,11 +153,12 @@ def _shell_assets():
     assets = ROOT / "assets"
     font = base64.b64encode((assets / "outfit-latin.woff2").read_bytes()).decode("ascii")
     return (font, (assets / "setta-monitor.css").read_text(encoding="utf-8"),
-            (assets / "setta-monitor-navigation.js").read_text(encoding="utf-8"))
+            (assets / "setta-monitor-navigation.js").read_text(encoding="utf-8"),
+            base64.b64encode((assets / "setta-logo-oficial.svg").read_bytes()).decode("ascii"))
 
 
-def render_setta_shell(logo_data: str, logo_mime: str) -> None:
-    font, css, navigation = _shell_assets()
+def render_setta_shell() -> None:
+    font, css, navigation, official_logo = _shell_assets()
     st.html(
         f'<style id="setta-inv-shell-style">@font-face{{font-family:Outfit;'
         f'src:url(data:font/woff2;base64,{font}) format("woff2");font-weight:100 900;'
@@ -169,7 +169,7 @@ def render_setta_shell(logo_data: str, logo_mime: str) -> None:
         '<header class="setta-inv-top" aria-label="Monitor de APIs Setta">'
         '<button class="setta-drawer-toggle" type="button" aria-expanded="false" '
         'aria-controls="setta-fechamento-sidebar" aria-label="Abrir menu lateral"></button>'
-        f'<span class="setta-inv-mark">{logo_html(logo_data, logo_mime)}</span>'
+        f'<span class="setta-inv-mark">{logo_html(official_logo, "image/svg+xml")}</span>'
         '<b>Monitor de APIs</b><small>Central de Dados</small></header>'
         '<div class="setta-inv-route-loader" role="status" aria-live="polite">Carregando aba…</div>'
     )
@@ -310,21 +310,9 @@ def api_card(api: dict) -> str:
             '</div>'
         )
 
-    api_id = quote(str(api.get("id") or ""), safe="")
-    menu_html = (
-        '<details class="api-menu">'
-        '<summary aria-label="Ações da API" title="Ações">⋮</summary>'
-        '<div class="api-menu-panel">'
-        f'<a href="?restart_api={api_id}" target="_self">Reiniciar API</a>'
-        '</div></details>'
-        if api_id
-        else ""
-    )
-
     return (
         '<div class="api-card" '
         f'style="--status:{accent};--status-soft:{soft};--status-text:{text};--status-border:{border}">'
-        f'{menu_html}'
         '<div class="api-top"><div>'
         f'<div class="api-name">{esc(api.get("name"))}</div>'
         f'<div class="api-app">{esc(api.get("app_name") or "Integração SETTA")}</div>'
