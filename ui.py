@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import html
 from pathlib import Path
+from functools import lru_cache
 from urllib.parse import quote
 
 import streamlit as st
@@ -12,38 +13,8 @@ LOGO_FILE = ROOT / "config" / "logo_setta.svg"
 
 CSS = """
 <style>
-[data-testid="stAppViewContainer"]{background:#f4f7fb!important}
-[data-testid="stHeader"]{background:rgba(255,255,255,.96)!important}
-.block-container{max-width:1780px!important;padding-top:3.2rem!important;padding-left:2.7rem!important;padding-right:2.7rem!important;padding-bottom:3rem!important;width:100%!important}
-section[data-testid="stSidebar"]{background:#fff!important;border-right:1px solid #e8ebf0!important;width:260px!important;min-width:260px!important;max-width:260px!important;flex-basis:260px!important}
-section[data-testid="stSidebar"] .block-container{padding-top:1.6rem!important;padding-left:1rem!important;padding-right:1rem!important}
-section[data-testid="stSidebar"][aria-expanded="false"]{width:0!important;min-width:0!important;max-width:0!important;flex-basis:0!important}
-.sidebar-brand{background:#f8fafc;border:1px solid #e5e8ee;border-radius:12px;padding:.9rem 1rem;margin:0 0 1.05rem 0}
-.sidebar-brand-title{font-size:.92rem;font-weight:800;color:#111827;letter-spacing:-.01em}
-.sidebar-brand-sub{margin-top:.18rem;font-size:.75rem;color:#6b7280}
-.sidebar-section-label{margin:.25rem 0 .45rem;color:#374151;font-size:.76rem;font-weight:800;text-transform:uppercase;letter-spacing:.055em}
-.sidebar-logo-preview{width:100%;min-height:82px;display:flex;justify-content:center;align-items:center;margin:.65rem 0 .5rem;padding:.65rem .8rem;background:#fff;border:1px dashed #d1d5db;border-radius:10px;box-sizing:border-box;overflow:hidden}
-.sidebar-logo-preview img{display:block;width:auto;height:auto;max-width:140px;max-height:62px;object-fit:contain}
-.sidebar-info-card{background:#f8fafc;border:1px solid #e5e8ee;border-radius:10px;padding:.75rem .85rem;color:#6b7280;font-size:.76rem;line-height:1.55}
 .global-visual-preview{width:100%;max-width:360px;min-height:110px;display:flex;justify-content:center;align-items:center;margin:.45rem 0 1rem;padding:.8rem 1rem;background:#fff;border:1px solid #e5e8ee;border-radius:12px;box-sizing:border-box}
 .global-visual-preview img{display:block;width:auto;height:auto;max-width:190px;max-height:78px;object-fit:contain}
-section[data-testid="stSidebar"] div[role="radiogroup"]{display:flex;flex-direction:column;gap:.34rem}
-section[data-testid="stSidebar"] div[role="radiogroup"] label{position:relative;width:100%;min-height:42px;display:flex!important;align-items:center!important;padding:.56rem .72rem .56rem .88rem!important;margin:0!important;border:1px solid transparent!important;border-radius:10px!important;background:transparent!important;cursor:pointer}
-section[data-testid="stSidebar"] div[role="radiogroup"] label>div:first-child{position:absolute!important;opacity:0!important;width:0!important;height:0!important;overflow:hidden!important}
-section[data-testid="stSidebar"] div[role="radiogroup"] label p{margin:0!important;font-size:.83rem!important;font-weight:600!important;color:#374151!important;white-space:normal!important;line-height:1.25!important;text-transform:uppercase!important}
-section[data-testid="stSidebar"] div[role="radiogroup"] label:hover{background:#f8fafc!important;border-color:#e5e7eb!important}
-section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked){background:#111827!important;border-color:#111827!important;box-shadow:0 5px 14px rgba(17,24,39,.14)!important}
-section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)::before{content:"";position:absolute;left:.42rem;top:50%;width:4px;height:20px;border-radius:999px;background:#ef4444;transform:translateY(-50%)}
-section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p{color:#fff!important;font-weight:700!important}
-
-[data-testid="stAppViewContainer"] > .main,[data-testid="stAppViewContainer"] .main,[data-testid="stMain"],.stMain{width:100%!important;max-width:100%!important;margin-left:0!important;margin-right:0!important}
-[data-testid="stAppViewContainer"] .main .block-container,[data-testid="stMain"] .block-container,.stMain .block-container{width:100%!important;max-width:100%!important;margin-left:0!important;margin-right:0!important}
-
-.setta-logo-card{width:100%;min-height:128px;display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid #e5e8ee;border-radius:16px;box-shadow:0 4px 14px rgba(24,39,75,.08);box-sizing:border-box;margin:0 0 2.55rem;padding:1.1rem 2rem}
-.setta-logo-card img{display:block;width:auto;height:auto;max-width:205px;max-height:86px;object-fit:contain}
-.app-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1.65rem}
-.app-title{margin:0!important;padding:0!important;font-size:2.55rem!important;line-height:1.08!important;font-weight:800!important;letter-spacing:-.04em!important;color:#050505!important}
-.app-sub{margin-top:.72rem!important;color:#4f5661!important;font-size:.94rem!important}
 .system-pill{display:inline-flex;align-items:center;gap:.48rem;background:#ecfdf3;border:1px solid #bbf7d0;color:#166534;border-radius:999px;padding:.46rem .68rem;font-size:.72rem;font-weight:900;white-space:nowrap}
 .pulse{width:8px;height:8px;border-radius:999px;background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.12)}
 
@@ -54,8 +25,8 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 .kpi-value{font-size:1.55rem;font-weight:900;letter-spacing:-.02em;color:#111827}
 .kpi-note{margin-top:.3rem;font-size:.68rem;color:#94a3b8}
 
-.section-band{margin:1.25rem 0 .95rem;padding:.82rem 1rem;background:#fff;border:1px solid #e5e8ee;border-left:5px solid #111827;border-radius:12px;box-shadow:0 3px 12px rgba(15,23,42,.035)}
-.section-band-kicker{font-size:.66rem;font-weight:900;letter-spacing:.085em;text-transform:uppercase;color:#ef4444;margin-bottom:.18rem}
+.section-band{margin:1.25rem 0 .95rem;padding:.82rem 1rem;background:#fff;border:1px solid #e5e8ee;border-left:4px solid #ffbb00;border-radius:12px;box-shadow:0 3px 12px rgba(15,23,42,.035)}
+.section-band-kicker{font-size:.66rem;font-weight:900;letter-spacing:.085em;text-transform:uppercase;color:#775500;margin-bottom:.18rem}
 .section-band-title{font-size:1.08rem;font-weight:900;color:#111827;letter-spacing:-.015em;line-height:1.2;text-transform:uppercase}
 .section-band-note{margin-top:.26rem;color:#667085;font-size:.78rem;line-height:1.45}
 .topic-divider{height:1px;background:#cbd5e1;margin:1.55rem 0 1.05rem;width:100%}
@@ -164,9 +135,6 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 @media (max-width:1100px){.api-grid,.integration-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.source-grid,.derived-grid{grid-template-columns:1fr}}
 @media (max-width:900px){
 .api-source-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-.block-container{padding-top:2rem!important;padding-left:1rem!important;padding-right:1rem!important;padding-bottom:2rem!important}
-.setta-logo-card{min-height:105px;margin-bottom:1.8rem;padding:.9rem 1rem}.setta-logo-card img{max-width:170px;max-height:72px}
-.app-head{flex-direction:column;gap:.7rem}.app-title{font-size:2rem!important}
 .kpi-grid,.api-grid,.integration-grid,.source-grid,.derived-grid{grid-template-columns:1fr!important}
 .table-row{grid-template-columns:1fr!important}.table-head{display:none!important}
 .table-cell{border-right:0!important;border-bottom:1px solid #eef0f3;justify-content:flex-start!important}
@@ -179,6 +147,33 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 def inject_css() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
 
+
+
+@lru_cache(maxsize=1)
+def _shell_assets():
+    assets = ROOT / "assets"
+    font = base64.b64encode((assets / "outfit-latin.woff2").read_bytes()).decode("ascii")
+    return (font, (assets / "setta-monitor.css").read_text(encoding="utf-8"),
+            (assets / "setta-monitor-navigation.js").read_text(encoding="utf-8"))
+
+
+def render_setta_shell(logo_data: str, logo_mime: str) -> None:
+    font, css, navigation = _shell_assets()
+    st.html(
+        f'<style id="setta-inv-shell-style">@font-face{{font-family:Outfit;'
+        f'src:url(data:font/woff2;base64,{font}) format("woff2");font-weight:100 900;'
+        f'font-display:swap}}{css}</style>'
+        '<span class="setta-shell-marker" aria-hidden="true"></span>'
+    )
+    top = (
+        '<header class="setta-inv-top" aria-label="Monitor de APIs Setta">'
+        '<button class="setta-drawer-toggle" type="button" aria-expanded="false" '
+        'aria-controls="setta-fechamento-sidebar" aria-label="Abrir menu lateral"></button>'
+        f'<span class="setta-inv-mark">{logo_html(logo_data, logo_mime)}</span>'
+        '<b>Monitor de APIs</b><small>Central de Dados</small></header>'
+        '<div class="setta-inv-route-loader" role="status" aria-live="polite">Carregando aba…</div>'
+    )
+    st.html(top + f'<script>{navigation}</script>', unsafe_allow_javascript=True)
 
 def logo_html(data: str = "", mime: str = "image/svg+xml") -> str:
     if data:

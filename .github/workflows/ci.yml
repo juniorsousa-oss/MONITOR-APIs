@@ -36,6 +36,7 @@ jobs:
               "kpi_grid",
               "logo_html",
               "section_band",
+              "render_setta_shell",
               "source_card",
           }
           missing = sorted(required - functions)
@@ -43,5 +44,11 @@ jobs:
 
           app = Path("streamlit_app.py").read_text(encoding="utf-8")
           assert "ui_components.integration_card(item)" in app
+          assert 'key=f"setta_nav_{index}"' in app
+          css = Path("assets/setta-monitor.css").read_text(encoding="utf-8")
+          nav = Path("assets/setta-monitor-navigation.js").read_text(encoding="utf-8")
+          assert ".setta-drawer-toggle::before" in css and "rotate(-45deg)" in css
+          assert "setDrawer(!drawerOpen())" in nav
+          assert Path("assets/outfit-latin.woff2").is_file()
           print("UI_CONTRACT_OK")
           PY
