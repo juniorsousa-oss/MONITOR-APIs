@@ -1030,6 +1030,38 @@ SOURCE_CATALOG = [
         "mode": "UPLOAD CENTRAL",
         "api_plan": True,
     },
+    {
+        "key": "ops",
+        "name": "OPS",
+        "source_system": "PROTHEUS",
+        "apps": "Fechamento Mensal",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "kardex_s2",
+        "name": "KARDEX S2",
+        "source_system": "PROTHEUS",
+        "apps": "Fechamento Mensal",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "kardex_ep",
+        "name": "KARDEX EP",
+        "source_system": "PROTHEUS",
+        "apps": "Fechamento Mensal",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
+    {
+        "key": "kardex_e2",
+        "name": "KARDEX E2",
+        "source_system": "PROTHEUS",
+        "apps": "Fechamento Mensal",
+        "mode": "UPLOAD CENTRAL",
+        "api_plan": True,
+    },
 ]
 
 DERIVED_CATALOG = [
@@ -1804,6 +1836,93 @@ def _read_xlsx_streaming(raw: bytes) -> list[dict[str, Any]]:
     return sheets
 
 
+
+# Preserva exatamente a leitura física usada pelos parsers do Fechamento Mensal.
+CLOSING_MOVEMENT_KEYS = {"ops", "kardex_s2", "kardex_ep", "kardex_e2"}
+
+
+def _build_closing_movement_pack(source_key: str, file_name: str, raw: bytes) -> tuple[bytes, int]:
+    if Path(file_name.lower()).suffix not in {".xlsx", ".xltx"}:
+        raise ValueError("OPS e KARDEX exigem o relatório original XLSX/XLTX.")
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    sheets = []
+    records = 0
+    expected_warehouse = source_key.removeprefix("kardex_").upper()
+    header_found = False
+
+    def token(value):
+        text = unicodedata.normalize("NFKD", str(value or ""))
+        return re.sub(r"[^A-Z0-9]", "", "".join(
+            ch for ch in text.upper() if not unicodedata.combining(ch)
+        ))
+
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        if sum(x.file_size for x in archive.infolist()) > 700_000_000:
+            raise ValueError("Relatório descompactado muito grande.")
+        manifest, date1904 = _xlsx_workbook_manifest(archive)
+        strings = _xlsx_shared_strings(archive)
+        for index, (name, path) in enumerate(manifest):
+            rows, numbers = [], []
+            sheet_header = False
+            with archive.open(path) as stream:
+                for _, node in ET.iterparse(stream, events=("end",)):
+                    if node.tag != ns + "row":
+                        continue
+                    line = int(node.get("r") or 0)
+                    row = []
+                    for cell in node.findall(ns + "c"):
+                        col = _xlsx_column_index(cell.get("r", ""))
+                        if not col:
+                            continue
+                        value = cell.findtext(ns + "v")
+                        kind = cell.get("t")
+                        if kind == "inlineStr":
+                            value = "".join(t.text or "" for t in cell.iter(ns + "t"))
+                        elif kind == "s" and value is not None:
+                            value = strings[int(value)]
+                        if value in (None, ""):
+                            continue
+                        while len(row) < col:
+                            row.append(None)
+                        row[col - 1] = value
+                    if row:
+                        rows.append(row)
+                        numbers.append(line)
+                        at = lambda i: row[i] if i < len(row) else None
+                        if source_key == "ops":
+                            names = {token(v) for v in row}
+                            if (names & {"ORDPRODUCAO", "ORDEMPRODUCAO", "ORDEMDEPRODUCAO", "OP", "ORDPROD", "ORDEMPROD", "ORDDEPRODUCAO", "NUMOP", "NUMERODAOP"}
+                                and names & {"LOTE", "NUMLOTE", "NUMEROLOTE", "LOTEPRODUTO", "CODLOTE", "CODIGOLOTE"}
+                                and names & {"TIPOREDE", "TIPOMOVIMENTO", "TIPOMOV", "TIPOREQUISICAODEVOLUCAO"}
+                                and names & {"TPMOVIMENTO", "TPMOVIM", "TES", "CODTES", "CODIGOTES", "TPMOV", "TIPOTES"}):
+                                sheet_header = header_found = True
+                            elif sheet_header:
+                                records += 1
+                        elif token(at(0)) in {"CODIGO", "CODPRODUTO"} and token(at(12)) == "TES":
+                            if "DATA" not in token(at(10)) or "OP" not in token(at(30)):
+                                raise ValueError("Layout KARDEX inválido: confira K, M e AE.")
+                            sheet_header = header_found = True
+                        elif sheet_header and (at(10) or at(12)):
+                            if str(at(11) or "").strip().upper() != expected_warehouse:
+                                raise ValueError("KARDEX de armazém diferente de " + expected_warehouse)
+                            records += 1
+                    node.clear()
+            sheets.append({
+                "index": index, "name": name, "rows": rows, "row_numbers": numbers,
+                "row_count": len(rows), "column_count": max(map(len, rows), default=0),
+                "date1904": date1904,
+            })
+    if not header_found or not records:
+        raise ValueError("Relatório sem cabeçalho ou movimentos válidos para " + source_key.upper())
+    payload = {
+        "format": "SETTA_SOURCE_V1", "source_key": source_key, "file_name": file_name,
+        "profile": "CLOSING_XML_VALUES_V1", "source_sha256": hashlib.sha256(raw).hexdigest(),
+        "sheets": sheets,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return gzip.compress(encoded, compresslevel=6, mtime=0), records
+
+
 def build_normalized_source(
     source_key: str,
     file_name: str,
@@ -1814,6 +1933,8 @@ def build_normalized_source(
     O Excel original continua no Storage para auditoria. Os consumidores
     usam a representação técnica e só recorrem ao bruto como contingência.
     """
+    if str(source_key).strip().lower() in CLOSING_MOVEMENT_KEYS:
+        return _build_closing_movement_pack(str(source_key).strip().lower(), file_name, raw)
     suffix = Path(str(file_name or "").lower()).suffix
     sheets: list[dict[str, Any]] = []
 
@@ -1954,7 +2075,7 @@ def _publish_normalized_source(
             "source_version": int(source_version),
             "rows_count": int(normalized_rows),
             "format": "SETTA_SOURCE_V1",
-            "profile": "WORKBOOK_MATRIX_V1",
+            "profile": ("CLOSING_XML_VALUES_V1" if source_key in CLOSING_MOVEMENT_KEYS else "WORKBOOK_MATRIX_V1"),
             "content_sha256": hashlib.sha256(normalized).hexdigest(),
         },
         timeout=45,
@@ -2048,7 +2169,7 @@ def save_report(
     pre_normalized: bytes | None = None
     pre_normalized_rows = 0
     source_kind = str(source_key).strip().lower()
-    if source_kind in {"movimentacao", "relatorio_geral"}:
+    if source_kind in {"movimentacao", "relatorio_geral"} | CLOSING_MOVEMENT_KEYS:
         pre_normalized, pre_normalized_rows = build_normalized_source(
             source_key,
             file_name,
